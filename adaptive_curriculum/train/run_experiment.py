@@ -12,6 +12,7 @@ def parse_args():
     parser.add_argument("--output-root", type=str, default=None)
     parser.add_argument("--data-root", type=str, default=None)
     parser.add_argument("--pretrained-root", type=str, default=None)
+    parser.add_argument("--repo-root", type=str, default=None, help="Path to LlamaGen repo root")
     parser.add_argument("--t5-cache-dir", type=str, default=None)
     parser.add_argument("--no-model", action="store_true", help="Dry run without LlamaGen (heuristic reward only)")
     parser.add_argument("--num-steps", type=int, default=None)
@@ -36,6 +37,8 @@ def main():
         config.paths.data_root = args.data_root
     if args.pretrained_root:
         config.paths.pretrained_root = args.pretrained_root
+    if args.repo_root:
+        config.paths.repo_root = args.repo_root
     if args.t5_cache_dir:
         config.paths.t5_cache_dir = args.t5_cache_dir
     if args.num_steps:
