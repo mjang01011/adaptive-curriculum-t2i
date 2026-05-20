@@ -121,12 +121,6 @@ class LlamaGenWrapper:
             freeze_base_model(m)
             n_trainable = count_trainable_parameters(m)
             print(f"[LlamaGenWrapper] LoRA injected. Trainable params: {n_trainable:,}")
-            # bfloat16 gradient overflow through 36 frozen layers produces NaN/inf
-            # at LoRA params deep in backward. Replace with 0: NaN * 0 should be 0 (lora_B init=0)
-            # and clip_grad_norm handles any large-but-finite gradients afterward.
-            for p in m.parameters():
-                if p.requires_grad:
-                    p.register_hook(lambda g: g.nan_to_num(nan=0.0, posinf=0.0, neginf=0.0))
         else:
             for p in m.parameters():
                 p.requires_grad = True
@@ -402,8 +396,8 @@ class LlamaGenWrapper:
         self.gpt.train()
         tokens_long = image_tokens.long()
         B = tokens_long.shape[0]
-        # match model dtype (bfloat16); logits converted to fp32 after forward
-        c_cast = c_indices.to(dtype=self.dtype)
+        # model is in float32 when this is called (cast by train_grpo_step)
+        c_cast = c_indices.float()
 
         if cfg_scale > 1.0:
             # Doubled batch: [conditional, unconditional]
@@ -531,6 +525,11 @@ class LlamaGenWrapper:
                 ref_log_probs = self._compute_log_probs_ref(stacked_tokens, rep_c, rep_masks, cfg_scale=self.cfg_scale)
 
         # 7. Chunked gradient accumulation — avoids OOM from full B*G forward with grad
+        # Cast to float32: bfloat16 backward through 36 frozen layers overflows to NaN.
+        # float32 has 8 extra exponent bits so gradients stay finite end-to-end.
+        # Cost: ~+1.5 GB for the duration of this block; cast back after optimizer step.
+        self.gpt.float()
+
         chunk_size = B  # process one prompt's samples at a time
         total = B * num_samples
         self._optimizer.zero_grad()
@@ -563,12 +562,14 @@ class LlamaGenWrapper:
             self.max_grad_norm,
         ).item()
 
-        # skip update if gradients are NaN/inf (e.g. from -inf log probs)
         if torch.isfinite(torch.tensor(grad_norm)):
             self._optimizer.step()
         else:
             print(f"[GRPO] WARNING: skipping optimizer step, grad_norm={grad_norm}")
             self._optimizer.zero_grad()
+
+        # Cast back to bfloat16 for generation
+        self.gpt.to(dtype=self.dtype)
 
         self._step += 1
         return {
