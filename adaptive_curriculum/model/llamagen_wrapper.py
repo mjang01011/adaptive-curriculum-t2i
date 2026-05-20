@@ -523,13 +523,17 @@ class LlamaGenWrapper:
         ref_log_probs = None
         if beta > 0.0:
             with torch.no_grad():
-                ref_log_probs = self._compute_log_probs_ref(stacked_tokens, rep_c, rep_masks, cfg_scale=self.cfg_scale)
+                ref_log_probs = self._compute_log_probs_ref(stacked_tokens, rep_c, rep_masks, cfg_scale=1.0)
 
         # 7. Chunked gradient accumulation — avoids OOM from full B*G forward with grad
-        # Cast to float32: bfloat16 backward through 36 frozen layers overflows to NaN.
-        # float32 has 8 extra exponent bits so gradients stay finite end-to-end.
-        # Cost: ~+1.5 GB for the duration of this block; cast back after optimizer step.
+        # Cast to float32: bfloat16 backward through frozen layers overflows to NaN.
+        # Cast back after optimizer step.
         self.gpt.float()
+        # Log probs use conditional-only forward (cfg_scale=1.0): zero unconditional conditioning
+        # causes NaN intermediate activations in cls_embedding which corrupt the backward.
+        # Tokens were generated with CFG for quality; log probs under conditional model
+        # are still a valid policy-gradient signal (REINFORCE with baseline).
+        _lp_cfg_scale = 1.0
 
         chunk_size = B  # process one prompt's samples at a time
         total = B * num_samples
@@ -545,7 +549,7 @@ class LlamaGenWrapper:
             c_adv = flat_advantages[start:end]
             weight = (end - start) / total  # normalise so gradients sum correctly
 
-            lp = self._compute_log_probs(c_tok, c_cond, c_mask, cfg_scale=self.cfg_scale)
+            lp = self._compute_log_probs(c_tok, c_cond, c_mask, cfg_scale=_lp_cfg_scale)
             pg = -(c_adv * lp).mean() * weight
 
             if beta > 0.0 and ref_log_probs is not None:
