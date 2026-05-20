@@ -557,16 +557,25 @@ class LlamaGenWrapper:
             chunk_loss.backward()
             total_pg_loss += pg.item()
 
+        # Zero NaN/inf in individual param grads before computing the total norm.
+        # Gradient explosion in early layers (bfloat16-pretrained weights) produces NaN
+        # that propagates backward; late LoRA layers (closer to output) still have valid
+        # gradients and should update even when early layers blow up.
+        nan_grad_params = 0
+        for p in self.gpt.parameters():
+            if p.requires_grad and p.grad is not None:
+                if not torch.isfinite(p.grad).all():
+                    nan_grad_params += 1
+                    p.grad.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
+        if nan_grad_params > 0:
+            print(f"[GRPO] zeroed NaN/inf grads in {nan_grad_params} params before step")
+
         grad_norm = torch.nn.utils.clip_grad_norm_(
             [p for p in self.gpt.parameters() if p.requires_grad],
             self.max_grad_norm,
         ).item()
 
-        if torch.isfinite(torch.tensor(grad_norm)):
-            self._optimizer.step()
-        else:
-            print(f"[GRPO] WARNING: skipping optimizer step, grad_norm={grad_norm}")
-            self._optimizer.zero_grad()
+        self._optimizer.step()
 
         # Cast back to bfloat16 for generation
         self.gpt.to(dtype=self.dtype)
