@@ -18,6 +18,12 @@ def build_sampler(strategy: str, bucket_names: list, config):
     if strategy == "uniform":
         from adaptive_curriculum.curriculum.uniform_sampler import UniformSampler
         return UniformSampler(bucket_names)
+    elif strategy == "round_robin":
+        from adaptive_curriculum.curriculum.round_robin_sampler import RoundRobinSampler
+        return RoundRobinSampler(bucket_names)
+    elif strategy == "pooled_random":
+        from adaptive_curriculum.curriculum.pooled_random_sampler import PooledRandomSampler
+        return PooledRandomSampler(bucket_names)
     elif strategy == "static":
         from adaptive_curriculum.curriculum.static_sampler import StaticSampler
         phases = [
@@ -132,6 +138,13 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
             max_grad_norm=config.training.max_grad_norm,
         )
 
+    # for pooled_random: add a merged dataset entry so the loop can sample from it
+    from adaptive_curriculum.curriculum.pooled_random_sampler import POOLED_BUCKET
+    if strategy == "pooled_random":
+        from adaptive_curriculum.data.bucket_dataset import PooledDataset
+        datasets[POOLED_BUCKET] = PooledDataset(datasets)
+        print(f"[train] Pooled dataset: {len(datasets[POOLED_BUCKET])} train items")
+
     # build curriculum sampler
     sampler = build_sampler(strategy, bucket_names, config)
 
@@ -231,12 +244,17 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
                 "reward_mode": train_metrics_list[-1].get("reward_mode", grpo_reward_mode),
             })
 
-        # 3. Evaluate selected bucket (always hard_target for clean UCB signal)
-        bucket_eval_dir = str(run_dir / "evals" / f"step_{step:06d}" / bucket)
+        # 3. Evaluate selected bucket (always hard_target for clean signal)
+        # For pooled_random, training bucket is __pooled__ (no val items);
+        # rotate through real buckets round-robin for per-step eval logging.
+        eval_bucket = (
+            sampler.get_eval_bucket() if bucket == POOLED_BUCKET else bucket
+        )
+        bucket_eval_dir = str(run_dir / "evals" / f"step_{step:06d}" / eval_bucket)
         bucket_summary = evaluate_bucket(
             model=model,
             reward_model=reward_model,
-            val_items=datasets[bucket].val_items,
+            val_items=datasets[eval_bucket].val_items,
             out_dir=bucket_eval_dir,
             num_samples_per_prompt=num_samples,
             seed=config.seed,
@@ -262,8 +280,9 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
         logger.log_step_time(step, step_time)
         logger.log_gpu_stats(step)
 
+        log_bucket = eval_bucket if bucket == POOLED_BUCKET else bucket
         print(
-            f"[step {step:4d}/{num_steps}] bucket={bucket:25s}  "
+            f"[step {step:4d}/{num_steps}] bucket={log_bucket:25s}  "
             f"reward={bucket_summary['mean_raw_reward']:.4f}  "
             f"t={step_time:.1f}s"
         )

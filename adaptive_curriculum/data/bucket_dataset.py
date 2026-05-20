@@ -56,6 +56,27 @@ def load_bucket_datasets(
     return datasets
 
 
+class PooledDataset:
+    """Merges all bucket train items into one flat pool for pooled_random baseline."""
+
+    BUCKET_KEY = "__pooled__"
+
+    def __init__(self, bucket_datasets: Dict[str, "BucketDataset"]):
+        self.train_items: List[BucketItem] = []
+        for ds in bucket_datasets.values():
+            self.train_items.extend(ds.train_items)
+        self.val_items: List[BucketItem] = []  # val handled per-bucket in training loop
+        self.name = self.BUCKET_KEY
+
+    def sample_train_batch(self, batch_size: int) -> List[BucketItem]:
+        if not self.train_items:
+            return []
+        return random.choices(self.train_items, k=batch_size)
+
+    def __len__(self):
+        return len(self.train_items)
+
+
 if __name__ == "__main__":
     import argparse
 

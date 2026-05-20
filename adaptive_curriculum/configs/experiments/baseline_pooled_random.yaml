@@ -1,0 +1,38 @@
+# Baseline 1: pooled random sampling — standard no-curriculum baseline.
+# Training batches are drawn from all 2000 prompts combined; no bucket selection.
+# Identical compute budget to UCB runs for fair comparison.
+# Usage: EXPERIMENT=baseline_pooled_random STRATEGY=pooled_random sbatch train_curriculum.sh
+
+training:
+  num_curriculum_steps: 40
+  gradient_steps_per_curriculum_step: 4
+  train_batch_size: 2
+  learning_rate: 1.0e-4
+  max_grad_norm: 1.0
+  save_checkpoints: false
+
+grpo:
+  num_samples: 6
+  beta: 0.01
+  cfg_scale_train: 2.0
+  reward_mode: pseudo_soft_target
+  logprob_reduction: sum_sqrt_len
+  advantage_eps: 1.0e-4
+
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.0
+  start_layer: 0
+  target_modules: [wqkv, wo]
+
+evaluation:
+  cfg_scale: 2.0
+  full_eval_every_curriculum_step: 5
+  num_val_prompts_per_bucket: 8
+  num_samples_per_prompt: 2
+  reward_mode: hard_target
+
+ucb:
+  c: 0.25
+  epsilon: 0.1

@@ -26,6 +26,7 @@ LLAMAGEN=/viscam/u/jj277/adaptive-curriculum-t2i/LlamaGen
 PRETRAINED=/viscam/u/jj277/svl/B3S/baselines/LlamaGen/pretrained_models
 
 EXPERIMENT=${EXPERIMENT:-pilot_fast}   # override with: EXPERIMENT=full_ucb sbatch train_curriculum.sh
+STRATEGY=${STRATEGY:-ucb}              # override with: STRATEGY=pooled_random or STRATEGY=round_robin
 
 cd $PROJECT
 export PYTHONPATH=$PROJECT:$LLAMAGEN:$PYTHONPATH
@@ -35,7 +36,7 @@ mkdir -p /viscam/u/jj277/adaptive-curriculum-t2i/logs
 python -m adaptive_curriculum.train.run_experiment \
     --config $PROJECT/adaptive_curriculum/configs/experiment.yaml \
     --experiment $PROJECT/adaptive_curriculum/configs/experiments/${EXPERIMENT}.yaml \
-    --strategy ucb \
+    --strategy $STRATEGY \
     --repo-root      $LLAMAGEN \
     --data-root      /viscam/u/jj277/adaptive-curriculum-t2i/data \
     --gpt-ckpt       $PRETRAINED/t2i_XL_stage1_256.pt \
