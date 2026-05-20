@@ -56,7 +56,7 @@ training:
 
 grpo:
   num_samples: 8     # images generated per prompt per GRPO step (G)
-  beta: 0.01         # KL penalty weight vs reference (base model); set 0 to disable
+  beta: 0.0          # KL penalty weight vs reference; 0 = pure GRPO, stable for pilot
 
 evaluation:
   eval_every_curriculum_step: 1

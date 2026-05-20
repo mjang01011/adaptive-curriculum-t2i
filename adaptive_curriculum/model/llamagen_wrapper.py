@@ -532,7 +532,13 @@ class LlamaGenWrapper:
             [p for p in self.gpt.parameters() if p.requires_grad],
             self.max_grad_norm,
         ).item()
-        self._optimizer.step()
+
+        # skip update if gradients are NaN/inf (e.g. from -inf log probs)
+        if torch.isfinite(torch.tensor(grad_norm)):
+            self._optimizer.step()
+        else:
+            print(f"[GRPO] WARNING: skipping optimizer step, grad_norm={grad_norm}")
+            self._optimizer.zero_grad()
 
         self._step += 1
         return {
