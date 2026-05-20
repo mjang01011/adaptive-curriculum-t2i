@@ -1,0 +1,50 @@
+# Gatekeeper experiment: can GRPO improve spatial_relations when trained on it exclusively?
+#
+# If spatial val reward trends upward over 30 steps → GRPO method is sound, proceed to UCB.
+# If it flatlines or fluctuates → fix reward/GRPO before running curriculum comparisons.
+#
+# Key differences from pilot_grpo_stabilized:
+#   - fixed_bucket: spatial_relations (never switches buckets)
+#   - lr: 5e-5 (more conservative; pilot had volatile val with 1e-4)
+#   - beta: 0.02 (slightly stronger KL to prevent reward hacking)
+#   - num_val_prompts_per_bucket: 20 (use all 20 val prompts for cleaner signal)
+#   - num_samples_per_prompt: 4 (more samples per eval prompt = lower variance)
+#   - full_eval_every_curriculum_step: 2 (track all buckets every 2 steps for forgetting)
+#
+# Usage: EXPERIMENT=spatial_only_overfit STRATEGY=fixed_bucket sbatch train_curriculum.sh
+
+fixed_bucket: spatial_relations
+
+training:
+  num_curriculum_steps: 30
+  gradient_steps_per_curriculum_step: 4
+  train_batch_size: 2
+  learning_rate: 5.0e-5
+  max_grad_norm: 1.0
+  save_checkpoints: false
+
+grpo:
+  num_samples: 6
+  beta: 0.02
+  cfg_scale_train: 2.0
+  reward_mode: pseudo_soft_target
+  logprob_reduction: sum_sqrt_len
+  advantage_eps: 1.0e-4
+
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.0
+  start_layer: 0
+  target_modules: [wqkv, wo]
+
+evaluation:
+  cfg_scale: 2.0
+  full_eval_every_curriculum_step: 2
+  num_val_prompts_per_bucket: 20
+  num_samples_per_prompt: 4
+  reward_mode: hard_target
+
+ucb:
+  c: 0.25
+  epsilon: 0.1

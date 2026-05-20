@@ -21,6 +21,12 @@ def build_sampler(strategy: str, bucket_names: list, config):
     elif strategy == "round_robin":
         from adaptive_curriculum.curriculum.round_robin_sampler import RoundRobinSampler
         return RoundRobinSampler(bucket_names)
+    elif strategy == "fixed_bucket":
+        from adaptive_curriculum.curriculum.fixed_bucket_sampler import FixedBucketSampler
+        fixed = getattr(config, "fixed_bucket", None)
+        if fixed is None:
+            raise ValueError("strategy=fixed_bucket requires 'fixed_bucket: <name>' in config")
+        return FixedBucketSampler(fixed)
     elif strategy == "pooled_random":
         from adaptive_curriculum.curriculum.pooled_random_sampler import PooledRandomSampler
         return PooledRandomSampler(bucket_names)
