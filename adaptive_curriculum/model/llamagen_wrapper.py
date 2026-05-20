@@ -412,8 +412,9 @@ class LlamaGenWrapper:
                 mask=None,
                 valid=None,
             )
-            logits_cond = logits_2x[:B].float()
-            logits_uncond = logits_2x[B:].float()
+            # sanitize before CFG combination — bfloat16 can produce NaN/inf in deep layers
+            logits_cond = logits_2x[:B].float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
+            logits_uncond = logits_2x[B:].float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
             logits = logits_uncond + cfg_scale * (logits_cond - logits_uncond)
         else:
             logits, _ = self.gpt(
@@ -424,12 +425,12 @@ class LlamaGenWrapper:
                 mask=None,
                 valid=None,
             )
-            logits = logits.float()
+            logits = logits.float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
 
-        # fp32 log_softmax for numerical stability
+        # log_softmax backward requires finite logits — sanitized above
         log_p = F.log_softmax(logits, dim=-1)
         token_lp = log_p.gather(-1, tokens_long.unsqueeze(-1)).squeeze(-1)  # (B, seq_len)
-        token_lp = token_lp.nan_to_num(nan=-20.0, neginf=-20.0)
+        token_lp = token_lp.clamp(min=-20.0)
         return token_lp.mean(dim=-1)  # (B,) mean over tokens
 
     def _compute_log_probs_ref(self, image_tokens, c_indices, c_emb_masks, cfg_scale: float = 1.0):
@@ -508,7 +509,7 @@ class LlamaGenWrapper:
         # 4. Group-relative advantages per prompt
         mean_r = rewards.mean(dim=1, keepdim=True)   # (B, 1)
         std_r = rewards.std(dim=1, keepdim=True) + 1e-8
-        advantages = ((rewards - mean_r) / std_r)    # (B, num_samples)
+        advantages = ((rewards - mean_r) / std_r).nan_to_num(nan=0.0)  # (B, num_samples)
 
         # 5. Stack tokens: (B * num_samples, seq_len)
         stacked_tokens = torch.stack(all_tokens, dim=1).reshape(B * num_samples, -1)
