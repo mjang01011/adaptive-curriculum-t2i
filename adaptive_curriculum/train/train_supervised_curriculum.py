@@ -101,6 +101,7 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
             "alpha": config.lora.alpha,
             "dropout": config.lora.dropout,
             "target_modules": list(config.lora.get("target_modules", ["wqkv", "wo"])),
+            "start_layer": int(getattr(config.lora, "start_layer", 0)),
         } if config.model.use_lora else None
         model = LlamaGenWrapper(
             repo_root=config.paths.repo_root,
