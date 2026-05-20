@@ -1,0 +1,41 @@
+{
+  "bucket": "complex_composition",
+  "target_only": true,
+  "target_question_count_per_prompt": 4,
+  "description": "Evaluates four core composition constraints per prompt. Unlike pure buckets, complex intentionally mixes counts, relations, and/or attributes. No support questions are used.",
+  "templates": [
+    {
+      "type": "attribute",
+      "template": "Is the {object} {attribute}?",
+      "answer": "yes"
+    },
+    {
+      "type": "count",
+      "template": "Are there exactly {count_word} {object_plural} in the image?",
+      "answer": "yes"
+    },
+    {
+      "type": "relation",
+      "template": "Is/Are the {subject} {relation_phrase} the {object}?",
+      "answer": "yes"
+    },
+    {
+      "type": "anti_count_or_anti_relation",
+      "template": "Use only when needed as one of the four core constraints.",
+      "answer": "no"
+    }
+  ],
+  "reward_rule": {
+    "type": "normalized_target_accuracy",
+    "formula": "correct_target_questions / 4",
+    "max_reward": 1.0,
+    "min_reward": 0.0,
+    "vlm_answer_space": [
+      "yes",
+      "no",
+      "uncertain"
+    ],
+    "uncertain_score": 0.0
+  },
+  "ucb_note": "Prompt rewards are normalized to [0, 1]. Bucket score is mean prompt reward. This is the only intentionally mixed-skill bucket."
+}

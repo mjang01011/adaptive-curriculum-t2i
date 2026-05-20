@@ -1,0 +1,7152 @@
+[
+  {
+    "id": "complex_001",
+    "bucket": "complex_composition",
+    "prompt": "A red cube to the left of a blue sphere and below a green cone.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "cube",
+          "attribute": "red"
+        },
+        {
+          "name": "sphere",
+          "attribute": "blue"
+        },
+        {
+          "name": "cone",
+          "attribute": "green"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "red cube",
+          "relation": "left_of",
+          "object": "blue sphere"
+        },
+        {
+          "subject": "red cube",
+          "relation": "below",
+          "object": "green cone"
+        }
+      ],
+      "scene": "plain studio",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the red cube to the left of the blue sphere?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the red cube below the green cone?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cube red?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the sphere blue?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_002",
+    "bucket": "complex_composition",
+    "prompt": "A black cat under a wooden chair with a white dog to the right of the chair.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "cat",
+          "attribute": "black"
+        },
+        {
+          "name": "dog",
+          "attribute": "white"
+        },
+        {
+          "name": "chair",
+          "attribute": "wooden"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "black cat",
+          "relation": "under",
+          "object": "wooden chair"
+        },
+        {
+          "subject": "white dog",
+          "relation": "right_of",
+          "object": "wooden chair"
+        }
+      ],
+      "scene": "living room",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the black cat under the wooden chair?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the white dog to the right of the wooden chair?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cat black?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the dog white?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_003",
+    "bucket": "complex_composition",
+    "prompt": "A blue cup on top of a white plate with a silver spoon to the right of the plate.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "cup",
+          "attribute": "blue"
+        },
+        {
+          "name": "plate",
+          "attribute": "white"
+        },
+        {
+          "name": "spoon",
+          "attribute": "silver"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "blue cup",
+          "relation": "on_top_of",
+          "object": "white plate"
+        },
+        {
+          "subject": "silver spoon",
+          "relation": "right_of",
+          "object": "white plate"
+        }
+      ],
+      "scene": "kitchen table",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the blue cup on top of the white plate?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the silver spoon to the right of the white plate?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cup blue?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the plate white?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_004",
+    "bucket": "complex_composition",
+    "prompt": "A purple flower inside a glass vase to the left of a yellow book.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "flower",
+          "attribute": "purple"
+        },
+        {
+          "name": "vase",
+          "attribute": "glass"
+        },
+        {
+          "name": "book",
+          "attribute": "yellow"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "purple flower",
+          "relation": "inside",
+          "object": "glass vase"
+        },
+        {
+          "subject": "glass vase",
+          "relation": "left_of",
+          "object": "yellow book"
+        }
+      ],
+      "scene": "desk",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the purple flower inside the glass vase?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the glass vase to the left of the yellow book?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the flower purple?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the vase glass?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_005",
+    "bucket": "complex_composition",
+    "prompt": "A metal lamp on top of a wooden desk with a green notebook under the lamp.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "lamp",
+          "attribute": "metal"
+        },
+        {
+          "name": "desk",
+          "attribute": "wooden"
+        },
+        {
+          "name": "notebook",
+          "attribute": "green"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "metal lamp",
+          "relation": "on_top_of",
+          "object": "wooden desk"
+        },
+        {
+          "subject": "green notebook",
+          "relation": "under",
+          "object": "metal lamp"
+        }
+      ],
+      "scene": "office",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the metal lamp on top of the wooden desk?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the green notebook under the metal lamp?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the lamp metal?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the desk wooden?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_006",
+    "bucket": "complex_composition",
+    "prompt": "Three red apples inside a white bowl in a kitchen.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "apple",
+          "attribute": "red",
+          "plural": "apples"
+        },
+        {
+          "name": "bowl",
+          "attribute": "white"
+        }
+      ],
+      "counts": [
+        {
+          "object": "apple",
+          "object_plural": "apples",
+          "count": 3
+        }
+      ],
+      "relations": [
+        {
+          "subject": "red apples",
+          "relation": "inside",
+          "object": "white bowl"
+        }
+      ],
+      "scene": "kitchen",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly three apples in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the red apples inside the white bowl?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the apple red?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the bowl white?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_007",
+    "bucket": "complex_composition",
+    "prompt": "Two white candles to the left of a blue book on a shelf.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "candle",
+          "attribute": "white",
+          "plural": "candles"
+        },
+        {
+          "name": "book",
+          "attribute": "blue"
+        }
+      ],
+      "counts": [
+        {
+          "object": "candle",
+          "object_plural": "candles",
+          "count": 2
+        }
+      ],
+      "relations": [
+        {
+          "subject": "white candles",
+          "relation": "left_of",
+          "object": "blue book"
+        }
+      ],
+      "scene": "shelf",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly two candles in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the white candles to the left of the blue book?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the candle white?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the book blue?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_008",
+    "bucket": "complex_composition",
+    "prompt": "Four yellow birds above a green tree in a park.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "bird",
+          "attribute": "yellow",
+          "plural": "birds"
+        },
+        {
+          "name": "tree",
+          "attribute": "green"
+        }
+      ],
+      "counts": [
+        {
+          "object": "bird",
+          "object_plural": "birds",
+          "count": 4
+        }
+      ],
+      "relations": [
+        {
+          "subject": "yellow birds",
+          "relation": "above",
+          "object": "green tree"
+        }
+      ],
+      "scene": "park",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly four birds in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the yellow birds above the green tree?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the bird yellow?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the tree green?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_009",
+    "bucket": "complex_composition",
+    "prompt": "Three red cups next to a black plate on a table.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "cup",
+          "attribute": "red",
+          "plural": "cups"
+        },
+        {
+          "name": "plate",
+          "attribute": "black"
+        }
+      ],
+      "counts": [
+        {
+          "object": "cup",
+          "object_plural": "cups",
+          "count": 3
+        }
+      ],
+      "relations": [
+        {
+          "subject": "red cups",
+          "relation": "next_to",
+          "object": "black plate"
+        }
+      ],
+      "scene": "table",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly three cups in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the red cups next to the black plate?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cup red?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the plate black?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_010",
+    "bucket": "complex_composition",
+    "prompt": "Two brown dogs under a wooden bench in a park.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "dog",
+          "attribute": "brown",
+          "plural": "dogs"
+        },
+        {
+          "name": "bench",
+          "attribute": "wooden"
+        }
+      ],
+      "counts": [
+        {
+          "object": "dog",
+          "object_plural": "dogs",
+          "count": 2
+        }
+      ],
+      "relations": [
+        {
+          "subject": "brown dogs",
+          "relation": "under",
+          "object": "wooden bench"
+        }
+      ],
+      "scene": "park",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly two dogs in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the brown dogs under the wooden bench?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the dog brown?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the bench wooden?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_011",
+    "bucket": "complex_composition",
+    "prompt": "A green bottle to the left of a yellow cup, with a orange plate on top of the green bottle.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "bottle",
+          "attribute": "green"
+        },
+        {
+          "name": "cup",
+          "attribute": "yellow"
+        },
+        {
+          "name": "plate",
+          "attribute": "orange"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "green bottle",
+          "relation": "left_of",
+          "object": "yellow cup"
+        },
+        {
+          "subject": "orange plate",
+          "relation": "on_top_of",
+          "object": "green bottle"
+        }
+      ],
+      "scene": "dining table",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the green bottle to the left of the yellow cup?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the orange plate on top of the green bottle?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the bottle green?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cup yellow?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_012",
+    "bucket": "complex_composition",
+    "prompt": "A white rabbit to the right of a orange carrot, with a brown basket inside the white rabbit.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "rabbit",
+          "attribute": "white"
+        },
+        {
+          "name": "carrot",
+          "attribute": "orange"
+        },
+        {
+          "name": "basket",
+          "attribute": "brown"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "white rabbit",
+          "relation": "right_of",
+          "object": "orange carrot"
+        },
+        {
+          "subject": "brown basket",
+          "relation": "inside",
+          "object": "white rabbit"
+        }
+      ],
+      "scene": "garden",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the white rabbit to the right of the orange carrot?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the brown basket inside the white rabbit?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the rabbit white?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the carrot orange?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_013",
+    "bucket": "complex_composition",
+    "prompt": "A black camera on top of a silver tripod, with a red backpack to the left of the black camera.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "camera",
+          "attribute": "black"
+        },
+        {
+          "name": "tripod",
+          "attribute": "silver"
+        },
+        {
+          "name": "backpack",
+          "attribute": "red"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "black camera",
+          "relation": "on_top_of",
+          "object": "silver tripod"
+        },
+        {
+          "subject": "red backpack",
+          "relation": "left_of",
+          "object": "black camera"
+        }
+      ],
+      "scene": "studio",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the black camera on top of the silver tripod?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the red backpack to the left of the black camera?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the camera black?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the tripod silver?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_014",
+    "bucket": "complex_composition",
+    "prompt": "A purple hat on top of a striped scarf, with a wooden box to the right of the purple hat.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "hat",
+          "attribute": "purple"
+        },
+        {
+          "name": "scarf",
+          "attribute": "striped"
+        },
+        {
+          "name": "box",
+          "attribute": "wooden"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "purple hat",
+          "relation": "on_top_of",
+          "object": "striped scarf"
+        },
+        {
+          "subject": "wooden box",
+          "relation": "right_of",
+          "object": "purple hat"
+        }
+      ],
+      "scene": "closet",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the purple hat on top of the striped scarf?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the wooden box to the right of the purple hat?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the hat purple?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the scarf striped?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_015",
+    "bucket": "complex_composition",
+    "prompt": "A blue towel to the left of a pink soap, with a white sink on top of the blue towel.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "towel",
+          "attribute": "blue"
+        },
+        {
+          "name": "soap",
+          "attribute": "pink"
+        },
+        {
+          "name": "sink",
+          "attribute": "white"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "blue towel",
+          "relation": "left_of",
+          "object": "pink soap"
+        },
+        {
+          "subject": "white sink",
+          "relation": "on_top_of",
+          "object": "blue towel"
+        }
+      ],
+      "scene": "bathroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the blue towel to the left of the pink soap?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the white sink on top of the blue towel?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the towel blue?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the soap pink?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_016",
+    "bucket": "complex_composition",
+    "prompt": "A gold trophy on top of a black shelf, with a red flag below the gold trophy.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "trophy",
+          "attribute": "gold"
+        },
+        {
+          "name": "shelf",
+          "attribute": "black"
+        },
+        {
+          "name": "flag",
+          "attribute": "red"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "gold trophy",
+          "relation": "on_top_of",
+          "object": "black shelf"
+        },
+        {
+          "subject": "red flag",
+          "relation": "below",
+          "object": "gold trophy"
+        }
+      ],
+      "scene": "office",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the gold trophy on top of the black shelf?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the red flag below the gold trophy?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the trophy gold?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the shelf black?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_017",
+    "bucket": "complex_composition",
+    "prompt": "A gray laptop above a black mouse, with a white keyboard to the right of the gray laptop.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "laptop",
+          "attribute": "gray"
+        },
+        {
+          "name": "mouse",
+          "attribute": "black"
+        },
+        {
+          "name": "keyboard",
+          "attribute": "white"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "gray laptop",
+          "relation": "above",
+          "object": "black mouse"
+        },
+        {
+          "subject": "white keyboard",
+          "relation": "right_of",
+          "object": "gray laptop"
+        }
+      ],
+      "scene": "desk",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the gray laptop above the black mouse?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the white keyboard to the right of the gray laptop?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the laptop gray?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the mouse black?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_018",
+    "bucket": "complex_composition",
+    "prompt": "A yellow taxi to the left of a red truck, with a blue car to the right of the yellow taxi.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "taxi",
+          "attribute": "yellow"
+        },
+        {
+          "name": "truck",
+          "attribute": "red"
+        },
+        {
+          "name": "car",
+          "attribute": "blue"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "yellow taxi",
+          "relation": "left_of",
+          "object": "red truck"
+        },
+        {
+          "subject": "blue car",
+          "relation": "right_of",
+          "object": "yellow taxi"
+        }
+      ],
+      "scene": "street",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the yellow taxi to the left of the red truck?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the blue car to the right of the yellow taxi?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the taxi yellow?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the truck red?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_019",
+    "bucket": "complex_composition",
+    "prompt": "A ceramic mug on top of a wooden coaster, with a silver spoon next to the ceramic mug.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "mug",
+          "attribute": "ceramic"
+        },
+        {
+          "name": "coaster",
+          "attribute": "wooden"
+        },
+        {
+          "name": "spoon",
+          "attribute": "silver"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "ceramic mug",
+          "relation": "on_top_of",
+          "object": "wooden coaster"
+        },
+        {
+          "subject": "silver spoon",
+          "relation": "next_to",
+          "object": "ceramic mug"
+        }
+      ],
+      "scene": "coffee table",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the ceramic mug on top of the wooden coaster?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the silver spoon next to the ceramic mug?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the mug ceramic?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the coaster wooden?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_020",
+    "bucket": "complex_composition",
+    "prompt": "A orange pumpkin inside a green leaf, with a brown basket above the orange pumpkin.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "pumpkin",
+          "attribute": "orange"
+        },
+        {
+          "name": "leaf",
+          "attribute": "green"
+        },
+        {
+          "name": "basket",
+          "attribute": "brown"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "orange pumpkin",
+          "relation": "inside",
+          "object": "green leaf"
+        },
+        {
+          "subject": "brown basket",
+          "relation": "above",
+          "object": "orange pumpkin"
+        }
+      ],
+      "scene": "farm stand",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the orange pumpkin inside the green leaf?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the brown basket above the orange pumpkin?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the pumpkin orange?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the leaf green?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_021",
+    "bucket": "complex_composition",
+    "prompt": "Four pink balloons above a wooden chair in a party room.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "balloon",
+          "attribute": "pink",
+          "plural": "balloons"
+        },
+        {
+          "name": "chair",
+          "attribute": "wooden"
+        }
+      ],
+      "counts": [
+        {
+          "object": "balloon",
+          "object_plural": "balloons",
+          "count": 4
+        }
+      ],
+      "relations": [
+        {
+          "subject": "pink balloons",
+          "relation": "above",
+          "object": "wooden chair"
+        }
+      ],
+      "scene": "party room",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly four balloons in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the pink balloons above the wooden chair?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the balloon pink?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the chair wooden?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_022",
+    "bucket": "complex_composition",
+    "prompt": "Three blue books under a white lamp in a study room.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "book",
+          "attribute": "blue",
+          "plural": "books"
+        },
+        {
+          "name": "lamp",
+          "attribute": "white"
+        }
+      ],
+      "counts": [
+        {
+          "object": "book",
+          "object_plural": "books",
+          "count": 3
+        }
+      ],
+      "relations": [
+        {
+          "subject": "blue books",
+          "relation": "under",
+          "object": "white lamp"
+        }
+      ],
+      "scene": "study room",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly three books in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the blue books under the white lamp?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the book blue?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the lamp white?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_023",
+    "bucket": "complex_composition",
+    "prompt": "Two orange fish inside a glass aquarium in a room.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "fish",
+          "attribute": "orange",
+          "plural": "fish"
+        },
+        {
+          "name": "aquarium",
+          "attribute": "glass"
+        }
+      ],
+      "counts": [
+        {
+          "object": "fish",
+          "object_plural": "fish",
+          "count": 2
+        }
+      ],
+      "relations": [
+        {
+          "subject": "orange fish",
+          "relation": "inside",
+          "object": "glass aquarium"
+        }
+      ],
+      "scene": "room",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly two fish in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the orange fish inside the glass aquarium?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the fish orange?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the aquarium glass?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_024",
+    "bucket": "complex_composition",
+    "prompt": "Four silver spoons to the right of a black bowl in a kitchen.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "spoon",
+          "attribute": "silver",
+          "plural": "spoons"
+        },
+        {
+          "name": "bowl",
+          "attribute": "black"
+        }
+      ],
+      "counts": [
+        {
+          "object": "spoon",
+          "object_plural": "spoons",
+          "count": 4
+        }
+      ],
+      "relations": [
+        {
+          "subject": "silver spoons",
+          "relation": "right_of",
+          "object": "black bowl"
+        }
+      ],
+      "scene": "kitchen",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly four spoons in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the silver spoons to the right of the black bowl?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the spoon silver?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the bowl black?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_025",
+    "bucket": "complex_composition",
+    "prompt": "Three yellow flowers inside a clear vase in a windowsill.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "flower",
+          "attribute": "yellow",
+          "plural": "flowers"
+        },
+        {
+          "name": "vase",
+          "attribute": "clear"
+        }
+      ],
+      "counts": [
+        {
+          "object": "flower",
+          "object_plural": "flowers",
+          "count": 3
+        }
+      ],
+      "relations": [
+        {
+          "subject": "yellow flowers",
+          "relation": "inside",
+          "object": "clear vase"
+        }
+      ],
+      "scene": "windowsill",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly three flowers in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the yellow flowers inside the clear vase?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the flower yellow?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the vase clear?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_026",
+    "bucket": "complex_composition",
+    "prompt": "Two white shoes under a metal bench in a locker room.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "shoe",
+          "attribute": "white",
+          "plural": "shoes"
+        },
+        {
+          "name": "bench",
+          "attribute": "metal"
+        }
+      ],
+      "counts": [
+        {
+          "object": "shoe",
+          "object_plural": "shoes",
+          "count": 2
+        }
+      ],
+      "relations": [
+        {
+          "subject": "white shoes",
+          "relation": "under",
+          "object": "metal bench"
+        }
+      ],
+      "scene": "locker room",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly two shoes in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the white shoes under the metal bench?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the shoe white?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the bench metal?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_027",
+    "bucket": "complex_composition",
+    "prompt": "Four red toy cars inside a cardboard box in a playroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "toy car",
+          "attribute": "red",
+          "plural": "toy cars"
+        },
+        {
+          "name": "box",
+          "attribute": "cardboard"
+        }
+      ],
+      "counts": [
+        {
+          "object": "toy car",
+          "object_plural": "toy cars",
+          "count": 4
+        }
+      ],
+      "relations": [
+        {
+          "subject": "red toy cars",
+          "relation": "inside",
+          "object": "cardboard box"
+        }
+      ],
+      "scene": "playroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly four toy cars in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the red toy cars inside the cardboard box?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the toy car red?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the box cardboard?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_028",
+    "bucket": "complex_composition",
+    "prompt": "Three yellow pencils to the left of a blue notebook in a desk.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "pencil",
+          "attribute": "yellow",
+          "plural": "pencils"
+        },
+        {
+          "name": "notebook",
+          "attribute": "blue"
+        }
+      ],
+      "counts": [
+        {
+          "object": "pencil",
+          "object_plural": "pencils",
+          "count": 3
+        }
+      ],
+      "relations": [
+        {
+          "subject": "yellow pencils",
+          "relation": "left_of",
+          "object": "blue notebook"
+        }
+      ],
+      "scene": "desk",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly three pencils in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the yellow pencils to the left of the blue notebook?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the pencil yellow?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the notebook blue?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_029",
+    "bucket": "complex_composition",
+    "prompt": "Two white ducks inside a blue pond in a park.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "duck",
+          "attribute": "white",
+          "plural": "ducks"
+        },
+        {
+          "name": "pond",
+          "attribute": "blue"
+        }
+      ],
+      "counts": [
+        {
+          "object": "duck",
+          "object_plural": "ducks",
+          "count": 2
+        }
+      ],
+      "relations": [
+        {
+          "subject": "white ducks",
+          "relation": "inside",
+          "object": "blue pond"
+        }
+      ],
+      "scene": "park",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly two ducks in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the white ducks inside the blue pond?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the duck white?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the pond blue?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_030",
+    "bucket": "complex_composition",
+    "prompt": "Four gold stars above a silver moon in a night sky.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "star",
+          "attribute": "gold",
+          "plural": "stars"
+        },
+        {
+          "name": "moon",
+          "attribute": "silver"
+        }
+      ],
+      "counts": [
+        {
+          "object": "star",
+          "object_plural": "stars",
+          "count": 4
+        }
+      ],
+      "relations": [
+        {
+          "subject": "gold stars",
+          "relation": "above",
+          "object": "silver moon"
+        }
+      ],
+      "scene": "night sky",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly four stars in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the gold stars above the silver moon?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the star gold?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the moon silver?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_031",
+    "bucket": "complex_composition",
+    "prompt": "Three brown cookies inside a glass jar in a kitchen.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "cookie",
+          "attribute": "brown",
+          "plural": "cookies"
+        },
+        {
+          "name": "jar",
+          "attribute": "glass"
+        }
+      ],
+      "counts": [
+        {
+          "object": "cookie",
+          "object_plural": "cookies",
+          "count": 3
+        }
+      ],
+      "relations": [
+        {
+          "subject": "brown cookies",
+          "relation": "inside",
+          "object": "glass jar"
+        }
+      ],
+      "scene": "kitchen",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly three cookies in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the brown cookies inside the glass jar?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cookie brown?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the jar glass?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_032",
+    "bucket": "complex_composition",
+    "prompt": "Two green plants below a open window in a office.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "plant",
+          "attribute": "green",
+          "plural": "plants"
+        },
+        {
+          "name": "window",
+          "attribute": "open"
+        }
+      ],
+      "counts": [
+        {
+          "object": "plant",
+          "object_plural": "plants",
+          "count": 2
+        }
+      ],
+      "relations": [
+        {
+          "subject": "green plants",
+          "relation": "below",
+          "object": "open window"
+        }
+      ],
+      "scene": "office",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly two plants in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the green plants below the open window?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the plant green?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the window open?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_033",
+    "bucket": "complex_composition",
+    "prompt": "Four red buttons on top of a white shirt in a bedroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "button",
+          "attribute": "red",
+          "plural": "buttons"
+        },
+        {
+          "name": "shirt",
+          "attribute": "white"
+        }
+      ],
+      "counts": [
+        {
+          "object": "button",
+          "object_plural": "buttons",
+          "count": 4
+        }
+      ],
+      "relations": [
+        {
+          "subject": "red buttons",
+          "relation": "on_top_of",
+          "object": "white shirt"
+        }
+      ],
+      "scene": "bedroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly four buttons in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the red buttons on top of the white shirt?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the button red?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the shirt white?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_034",
+    "bucket": "complex_composition",
+    "prompt": "Three gold coins inside a leather pouch in a desk.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "coin",
+          "attribute": "gold",
+          "plural": "coins"
+        },
+        {
+          "name": "pouch",
+          "attribute": "leather"
+        }
+      ],
+      "counts": [
+        {
+          "object": "coin",
+          "object_plural": "coins",
+          "count": 3
+        }
+      ],
+      "relations": [
+        {
+          "subject": "gold coins",
+          "relation": "inside",
+          "object": "leather pouch"
+        }
+      ],
+      "scene": "desk",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly three coins in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the gold coins inside the leather pouch?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the coin gold?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the pouch leather?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_035",
+    "bucket": "complex_composition",
+    "prompt": "Two black helmets next to a blue bicycle in a garage.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "helmet",
+          "attribute": "black",
+          "plural": "helmets"
+        },
+        {
+          "name": "bicycle",
+          "attribute": "blue"
+        }
+      ],
+      "counts": [
+        {
+          "object": "helmet",
+          "object_plural": "helmets",
+          "count": 2
+        }
+      ],
+      "relations": [
+        {
+          "subject": "black helmets",
+          "relation": "next_to",
+          "object": "blue bicycle"
+        }
+      ],
+      "scene": "garage",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly two helmets in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the black helmets next to the blue bicycle?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the helmet black?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the bicycle blue?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_036",
+    "bucket": "complex_composition",
+    "prompt": "Four yellow lemons on top of a white plate in a table.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "lemon",
+          "attribute": "yellow",
+          "plural": "lemons"
+        },
+        {
+          "name": "plate",
+          "attribute": "white"
+        }
+      ],
+      "counts": [
+        {
+          "object": "lemon",
+          "object_plural": "lemons",
+          "count": 4
+        }
+      ],
+      "relations": [
+        {
+          "subject": "yellow lemons",
+          "relation": "on_top_of",
+          "object": "white plate"
+        }
+      ],
+      "scene": "table",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly four lemons in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the yellow lemons on top of the white plate?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the lemon yellow?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the plate white?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_037",
+    "bucket": "complex_composition",
+    "prompt": "Three white shells to the left of a gray rock in a beach.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "shell",
+          "attribute": "white",
+          "plural": "shells"
+        },
+        {
+          "name": "rock",
+          "attribute": "gray"
+        }
+      ],
+      "counts": [
+        {
+          "object": "shell",
+          "object_plural": "shells",
+          "count": 3
+        }
+      ],
+      "relations": [
+        {
+          "subject": "white shells",
+          "relation": "left_of",
+          "object": "gray rock"
+        }
+      ],
+      "scene": "beach",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly three shells in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the white shells to the left of the gray rock?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the shell white?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the rock gray?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_038",
+    "bucket": "complex_composition",
+    "prompt": "Two brown owls above a green tree in a forest.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "owl",
+          "attribute": "brown",
+          "plural": "owls"
+        },
+        {
+          "name": "tree",
+          "attribute": "green"
+        }
+      ],
+      "counts": [
+        {
+          "object": "owl",
+          "object_plural": "owls",
+          "count": 2
+        }
+      ],
+      "relations": [
+        {
+          "subject": "brown owls",
+          "relation": "above",
+          "object": "green tree"
+        }
+      ],
+      "scene": "forest",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly two owls in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the brown owls above the green tree?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the owl brown?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the tree green?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_039",
+    "bucket": "complex_composition",
+    "prompt": "Four silver gift boxes on top of a wooden table in a party room.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "gift box",
+          "attribute": "silver",
+          "plural": "gift boxes"
+        },
+        {
+          "name": "table",
+          "attribute": "wooden"
+        }
+      ],
+      "counts": [
+        {
+          "object": "gift box",
+          "object_plural": "gift boxes",
+          "count": 4
+        }
+      ],
+      "relations": [
+        {
+          "subject": "silver gift boxes",
+          "relation": "on_top_of",
+          "object": "wooden table"
+        }
+      ],
+      "scene": "party room",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly four gift boxes in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the silver gift boxes on top of the wooden table?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the gift box silver?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the table wooden?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_040",
+    "bucket": "complex_composition",
+    "prompt": "Three orange traffic cones to the right of a blue car in a road.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "traffic cone",
+          "attribute": "orange",
+          "plural": "traffic cones"
+        },
+        {
+          "name": "car",
+          "attribute": "blue"
+        }
+      ],
+      "counts": [
+        {
+          "object": "traffic cone",
+          "object_plural": "traffic cones",
+          "count": 3
+        }
+      ],
+      "relations": [
+        {
+          "subject": "orange traffic cones",
+          "relation": "right_of",
+          "object": "blue car"
+        }
+      ],
+      "scene": "road",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "count",
+        "question": "Are there exactly three traffic cones in the image?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the orange traffic cones to the right of the blue car?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the traffic cone orange?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the car blue?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_041",
+    "bucket": "complex_composition",
+    "prompt": "A yellow ball between two brown boxes, with a red cone above the yellow ball.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "ball",
+          "attribute": "yellow"
+        },
+        {
+          "name": "box",
+          "attribute": "brown"
+        },
+        {
+          "name": "cone",
+          "attribute": "red"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "yellow ball",
+          "relation": "between",
+          "object": "two brown boxes"
+        },
+        {
+          "subject": "red cone",
+          "relation": "above",
+          "object": "yellow ball"
+        }
+      ],
+      "scene": "playroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the yellow ball between the two brown boxes?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the red cone above the yellow ball?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the ball yellow?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the box brown?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_042",
+    "bucket": "complex_composition",
+    "prompt": "A green tree between two white houses, with a blue car to the right of the green tree.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "tree",
+          "attribute": "green"
+        },
+        {
+          "name": "house",
+          "attribute": "white"
+        },
+        {
+          "name": "car",
+          "attribute": "blue"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "green tree",
+          "relation": "between",
+          "object": "two white houses"
+        },
+        {
+          "subject": "blue car",
+          "relation": "right_of",
+          "object": "green tree"
+        }
+      ],
+      "scene": "street",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the green tree between the two white houses?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the blue car to the right of the green tree?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the tree green?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the house white?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_043",
+    "bucket": "complex_composition",
+    "prompt": "A wooden chair between two round tables, with a black lamp above the wooden chair.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "chair",
+          "attribute": "wooden"
+        },
+        {
+          "name": "table",
+          "attribute": "round"
+        },
+        {
+          "name": "lamp",
+          "attribute": "black"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "wooden chair",
+          "relation": "between",
+          "object": "two round tables"
+        },
+        {
+          "subject": "black lamp",
+          "relation": "above",
+          "object": "wooden chair"
+        }
+      ],
+      "scene": "dining room",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the wooden chair between the two round tables?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the black lamp above the wooden chair?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the chair wooden?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the table round?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_044",
+    "bucket": "complex_composition",
+    "prompt": "A blue vase between two white candles, with a purple flower inside the blue vase.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "vase",
+          "attribute": "blue"
+        },
+        {
+          "name": "candle",
+          "attribute": "white"
+        },
+        {
+          "name": "flower",
+          "attribute": "purple"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "blue vase",
+          "relation": "between",
+          "object": "two white candles"
+        },
+        {
+          "subject": "purple flower",
+          "relation": "inside",
+          "object": "blue vase"
+        }
+      ],
+      "scene": "table setting",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the blue vase between the two white candles?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the purple flower inside the blue vase?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the vase blue?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the candle white?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_045",
+    "bucket": "complex_composition",
+    "prompt": "A red car between two blue trucks, with a yellow sign above the red car.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "car",
+          "attribute": "red"
+        },
+        {
+          "name": "truck",
+          "attribute": "blue"
+        },
+        {
+          "name": "sign",
+          "attribute": "yellow"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "red car",
+          "relation": "between",
+          "object": "two blue trucks"
+        },
+        {
+          "subject": "yellow sign",
+          "relation": "above",
+          "object": "red car"
+        }
+      ],
+      "scene": "parking lot",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the red car between the two blue trucks?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the yellow sign above the red car?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the car red?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the truck blue?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_046",
+    "bucket": "complex_composition",
+    "prompt": "A purple flower between two gray rocks, with a green leaf below the purple flower.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "flower",
+          "attribute": "purple"
+        },
+        {
+          "name": "rock",
+          "attribute": "gray"
+        },
+        {
+          "name": "leaf",
+          "attribute": "green"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "purple flower",
+          "relation": "between",
+          "object": "two gray rocks"
+        },
+        {
+          "subject": "green leaf",
+          "relation": "below",
+          "object": "purple flower"
+        }
+      ],
+      "scene": "garden",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the purple flower between the two gray rocks?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the green leaf below the purple flower?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the flower purple?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the rock gray?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_047",
+    "bucket": "complex_composition",
+    "prompt": "A green cup between two white plates, with a silver fork to the right of the green cup.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "cup",
+          "attribute": "green"
+        },
+        {
+          "name": "plate",
+          "attribute": "white"
+        },
+        {
+          "name": "fork",
+          "attribute": "silver"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "green cup",
+          "relation": "between",
+          "object": "two white plates"
+        },
+        {
+          "subject": "silver fork",
+          "relation": "right_of",
+          "object": "green cup"
+        }
+      ],
+      "scene": "kitchen table",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the green cup between the two white plates?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the silver fork to the right of the green cup?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cup green?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the plate white?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_048",
+    "bucket": "complex_composition",
+    "prompt": "A brown dog between two wooden chairs, with a blue ball under the brown dog.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "dog",
+          "attribute": "brown"
+        },
+        {
+          "name": "chair",
+          "attribute": "wooden"
+        },
+        {
+          "name": "ball",
+          "attribute": "blue"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "brown dog",
+          "relation": "between",
+          "object": "two wooden chairs"
+        },
+        {
+          "subject": "blue ball",
+          "relation": "under",
+          "object": "brown dog"
+        }
+      ],
+      "scene": "living room",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the brown dog between the two wooden chairs?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the blue ball under the brown dog?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the dog brown?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the chair wooden?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_049",
+    "bucket": "complex_composition",
+    "prompt": "A marble statue between two stone columns, with a gold plaque below the marble statue.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "statue",
+          "attribute": "marble"
+        },
+        {
+          "name": "column",
+          "attribute": "stone"
+        },
+        {
+          "name": "plaque",
+          "attribute": "gold"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "marble statue",
+          "relation": "between",
+          "object": "two stone columns"
+        },
+        {
+          "subject": "gold plaque",
+          "relation": "below",
+          "object": "marble statue"
+        }
+      ],
+      "scene": "museum",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the marble statue between the two stone columns?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the gold plaque below the marble statue?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the statue marble?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the column stone?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_050",
+    "bucket": "complex_composition",
+    "prompt": "A woven basket between two green plants, with a red apple inside the woven basket.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "basket",
+          "attribute": "woven"
+        },
+        {
+          "name": "plant",
+          "attribute": "green"
+        },
+        {
+          "name": "apple",
+          "attribute": "red"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "woven basket",
+          "relation": "between",
+          "object": "two green plants"
+        },
+        {
+          "subject": "red apple",
+          "relation": "inside",
+          "object": "woven basket"
+        }
+      ],
+      "scene": "patio",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the woven basket between the two green plants?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the red apple inside the woven basket?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the basket woven?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the plant green?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_051",
+    "bucket": "complex_composition",
+    "prompt": "A red cube to the left of a white cup, and a pink flower below the red cube in a studio.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "cube",
+          "attribute": "red"
+        },
+        {
+          "name": "cup",
+          "attribute": "white"
+        },
+        {
+          "name": "flower",
+          "attribute": "pink"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "red cube",
+          "relation": "left_of",
+          "object": "white cup"
+        },
+        {
+          "subject": "pink flower",
+          "relation": "below",
+          "object": "red cube"
+        }
+      ],
+      "scene": "studio",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the red cube to the left of the white cup?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the pink flower below the red cube?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cube red?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cup white?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_052",
+    "bucket": "complex_composition",
+    "prompt": "A yellow book to the right of a brown box, and a gray cat on top of the yellow book in a living room.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "book",
+          "attribute": "yellow"
+        },
+        {
+          "name": "box",
+          "attribute": "brown"
+        },
+        {
+          "name": "cat",
+          "attribute": "gray"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "yellow book",
+          "relation": "right_of",
+          "object": "brown box"
+        },
+        {
+          "subject": "gray cat",
+          "relation": "on_top_of",
+          "object": "yellow book"
+        }
+      ],
+      "scene": "living room",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the yellow book to the right of the brown box?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the gray cat on top of the yellow book?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the book yellow?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the box brown?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_053",
+    "bucket": "complex_composition",
+    "prompt": "A orange plate above a pink flower, and a red apple under the orange plate in a kitchen.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "plate",
+          "attribute": "orange"
+        },
+        {
+          "name": "flower",
+          "attribute": "pink"
+        },
+        {
+          "name": "apple",
+          "attribute": "red"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "orange plate",
+          "relation": "above",
+          "object": "pink flower"
+        },
+        {
+          "subject": "red apple",
+          "relation": "under",
+          "object": "orange plate"
+        }
+      ],
+      "scene": "kitchen",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the orange plate above the pink flower?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the red apple under the orange plate?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the plate orange?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the flower pink?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_054",
+    "bucket": "complex_composition",
+    "prompt": "A striped pillow below a gray cat, and a red cube next to the striped pillow in a office.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "pillow",
+          "attribute": "striped"
+        },
+        {
+          "name": "cat",
+          "attribute": "gray"
+        },
+        {
+          "name": "cube",
+          "attribute": "red"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "striped pillow",
+          "relation": "below",
+          "object": "gray cat"
+        },
+        {
+          "subject": "red cube",
+          "relation": "next_to",
+          "object": "striped pillow"
+        }
+      ],
+      "scene": "office",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the striped pillow below the gray cat?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the red cube next to the striped pillow?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the pillow striped?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cat gray?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_055",
+    "bucket": "complex_composition",
+    "prompt": "A wooden chair on top of a red apple, and a yellow book to the left of the wooden chair in a bedroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "chair",
+          "attribute": "wooden"
+        },
+        {
+          "name": "apple",
+          "attribute": "red"
+        },
+        {
+          "name": "book",
+          "attribute": "yellow"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "wooden chair",
+          "relation": "on_top_of",
+          "object": "red apple"
+        },
+        {
+          "subject": "yellow book",
+          "relation": "left_of",
+          "object": "wooden chair"
+        }
+      ],
+      "scene": "bedroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the wooden chair on top of the red apple?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the yellow book to the left of the wooden chair?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the chair wooden?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the apple red?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_056",
+    "bucket": "complex_composition",
+    "prompt": "A brown dog under a red cube, and a orange plate to the right of the brown dog in a garden.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "dog",
+          "attribute": "brown"
+        },
+        {
+          "name": "cube",
+          "attribute": "red"
+        },
+        {
+          "name": "plate",
+          "attribute": "orange"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "brown dog",
+          "relation": "under",
+          "object": "red cube"
+        },
+        {
+          "subject": "orange plate",
+          "relation": "right_of",
+          "object": "brown dog"
+        }
+      ],
+      "scene": "garden",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the brown dog under the red cube?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the orange plate to the right of the brown dog?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the dog brown?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cube red?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_057",
+    "bucket": "complex_composition",
+    "prompt": "A round clock next to a yellow book, and a striped pillow above the round clock in a classroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "clock",
+          "attribute": "round"
+        },
+        {
+          "name": "book",
+          "attribute": "yellow"
+        },
+        {
+          "name": "pillow",
+          "attribute": "striped"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "round clock",
+          "relation": "next_to",
+          "object": "yellow book"
+        },
+        {
+          "subject": "striped pillow",
+          "relation": "above",
+          "object": "round clock"
+        }
+      ],
+      "scene": "classroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the round clock next to the yellow book?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the striped pillow above the round clock?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the clock round?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the book yellow?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_058",
+    "bucket": "complex_composition",
+    "prompt": "A blue sphere to the left of a orange plate, and a wooden chair below the blue sphere in a shelf.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "sphere",
+          "attribute": "blue"
+        },
+        {
+          "name": "plate",
+          "attribute": "orange"
+        },
+        {
+          "name": "chair",
+          "attribute": "wooden"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "blue sphere",
+          "relation": "left_of",
+          "object": "orange plate"
+        },
+        {
+          "subject": "wooden chair",
+          "relation": "below",
+          "object": "blue sphere"
+        }
+      ],
+      "scene": "shelf",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the blue sphere to the left of the orange plate?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the wooden chair below the blue sphere?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the sphere blue?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the plate orange?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_059",
+    "bucket": "complex_composition",
+    "prompt": "A black lamp to the right of a striped pillow, and a brown dog on top of the black lamp in a desk.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "lamp",
+          "attribute": "black"
+        },
+        {
+          "name": "pillow",
+          "attribute": "striped"
+        },
+        {
+          "name": "dog",
+          "attribute": "brown"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "black lamp",
+          "relation": "right_of",
+          "object": "striped pillow"
+        },
+        {
+          "subject": "brown dog",
+          "relation": "on_top_of",
+          "object": "black lamp"
+        }
+      ],
+      "scene": "desk",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the black lamp to the right of the striped pillow?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the brown dog on top of the black lamp?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the lamp black?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the pillow striped?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_060",
+    "bucket": "complex_composition",
+    "prompt": "A purple bottle above a wooden chair, and a round clock under the purple bottle in a playroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "bottle",
+          "attribute": "purple"
+        },
+        {
+          "name": "chair",
+          "attribute": "wooden"
+        },
+        {
+          "name": "clock",
+          "attribute": "round"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "purple bottle",
+          "relation": "above",
+          "object": "wooden chair"
+        },
+        {
+          "subject": "round clock",
+          "relation": "under",
+          "object": "purple bottle"
+        }
+      ],
+      "scene": "playroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the purple bottle above the wooden chair?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the round clock under the purple bottle?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the bottle purple?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the chair wooden?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_061",
+    "bucket": "complex_composition",
+    "prompt": "A glass vase below a brown dog, and a blue sphere next to the glass vase in a studio.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "vase",
+          "attribute": "glass"
+        },
+        {
+          "name": "dog",
+          "attribute": "brown"
+        },
+        {
+          "name": "sphere",
+          "attribute": "blue"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "glass vase",
+          "relation": "below",
+          "object": "brown dog"
+        },
+        {
+          "subject": "blue sphere",
+          "relation": "next_to",
+          "object": "glass vase"
+        }
+      ],
+      "scene": "studio",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the glass vase below the brown dog?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the blue sphere next to the glass vase?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the vase glass?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the dog brown?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_062",
+    "bucket": "complex_composition",
+    "prompt": "A round table on top of a round clock, and a black lamp to the left of the round table in a living room.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "table",
+          "attribute": "round"
+        },
+        {
+          "name": "clock",
+          "attribute": "round"
+        },
+        {
+          "name": "lamp",
+          "attribute": "black"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "round table",
+          "relation": "on_top_of",
+          "object": "round clock"
+        },
+        {
+          "subject": "black lamp",
+          "relation": "left_of",
+          "object": "round table"
+        }
+      ],
+      "scene": "living room",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the round table on top of the round clock?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the black lamp to the left of the round table?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the table round?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the clock round?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_063",
+    "bucket": "complex_composition",
+    "prompt": "A woven basket under a blue sphere, and a purple bottle to the right of the woven basket in a kitchen.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "basket",
+          "attribute": "woven"
+        },
+        {
+          "name": "sphere",
+          "attribute": "blue"
+        },
+        {
+          "name": "bottle",
+          "attribute": "purple"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "woven basket",
+          "relation": "under",
+          "object": "blue sphere"
+        },
+        {
+          "subject": "purple bottle",
+          "relation": "right_of",
+          "object": "woven basket"
+        }
+      ],
+      "scene": "kitchen",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the woven basket under the blue sphere?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the purple bottle to the right of the woven basket?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the basket woven?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the sphere blue?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_064",
+    "bucket": "complex_composition",
+    "prompt": "A square mirror next to a black lamp, and a glass vase above the square mirror in a office.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "mirror",
+          "attribute": "square"
+        },
+        {
+          "name": "lamp",
+          "attribute": "black"
+        },
+        {
+          "name": "vase",
+          "attribute": "glass"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "square mirror",
+          "relation": "next_to",
+          "object": "black lamp"
+        },
+        {
+          "subject": "glass vase",
+          "relation": "above",
+          "object": "square mirror"
+        }
+      ],
+      "scene": "office",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the square mirror next to the black lamp?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the glass vase above the square mirror?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the mirror square?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the lamp black?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_065",
+    "bucket": "complex_composition",
+    "prompt": "A green cone to the left of a purple bottle, and a round table below the green cone in a bedroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "cone",
+          "attribute": "green"
+        },
+        {
+          "name": "bottle",
+          "attribute": "purple"
+        },
+        {
+          "name": "table",
+          "attribute": "round"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "green cone",
+          "relation": "left_of",
+          "object": "purple bottle"
+        },
+        {
+          "subject": "round table",
+          "relation": "below",
+          "object": "green cone"
+        }
+      ],
+      "scene": "bedroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the green cone to the left of the purple bottle?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the round table below the green cone?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cone green?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the bottle purple?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_066",
+    "bucket": "complex_composition",
+    "prompt": "A white cup to the right of a glass vase, and a woven basket on top of the white cup in a garden.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "cup",
+          "attribute": "white"
+        },
+        {
+          "name": "vase",
+          "attribute": "glass"
+        },
+        {
+          "name": "basket",
+          "attribute": "woven"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "white cup",
+          "relation": "right_of",
+          "object": "glass vase"
+        },
+        {
+          "subject": "woven basket",
+          "relation": "on_top_of",
+          "object": "white cup"
+        }
+      ],
+      "scene": "garden",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the white cup to the right of the glass vase?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the woven basket on top of the white cup?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cup white?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the vase glass?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_067",
+    "bucket": "complex_composition",
+    "prompt": "A brown box above a round table, and a square mirror under the brown box in a classroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "box",
+          "attribute": "brown"
+        },
+        {
+          "name": "table",
+          "attribute": "round"
+        },
+        {
+          "name": "mirror",
+          "attribute": "square"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "brown box",
+          "relation": "above",
+          "object": "round table"
+        },
+        {
+          "subject": "square mirror",
+          "relation": "under",
+          "object": "brown box"
+        }
+      ],
+      "scene": "classroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the brown box above the round table?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the square mirror under the brown box?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the box brown?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the table round?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_068",
+    "bucket": "complex_composition",
+    "prompt": "A pink flower below a woven basket, and a green cone next to the pink flower in a shelf.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "flower",
+          "attribute": "pink"
+        },
+        {
+          "name": "basket",
+          "attribute": "woven"
+        },
+        {
+          "name": "cone",
+          "attribute": "green"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "pink flower",
+          "relation": "below",
+          "object": "woven basket"
+        },
+        {
+          "subject": "green cone",
+          "relation": "next_to",
+          "object": "pink flower"
+        }
+      ],
+      "scene": "shelf",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the pink flower below the woven basket?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the green cone next to the pink flower?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the flower pink?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the basket woven?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_069",
+    "bucket": "complex_composition",
+    "prompt": "A gray cat on top of a square mirror, and a white cup to the left of the gray cat in a desk.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "cat",
+          "attribute": "gray"
+        },
+        {
+          "name": "mirror",
+          "attribute": "square"
+        },
+        {
+          "name": "cup",
+          "attribute": "white"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "gray cat",
+          "relation": "on_top_of",
+          "object": "square mirror"
+        },
+        {
+          "subject": "white cup",
+          "relation": "left_of",
+          "object": "gray cat"
+        }
+      ],
+      "scene": "desk",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the gray cat on top of the square mirror?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the white cup to the left of the gray cat?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cat gray?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the mirror square?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_070",
+    "bucket": "complex_composition",
+    "prompt": "A red apple under a green cone, and a brown box to the right of the red apple in a playroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "apple",
+          "attribute": "red"
+        },
+        {
+          "name": "cone",
+          "attribute": "green"
+        },
+        {
+          "name": "box",
+          "attribute": "brown"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "red apple",
+          "relation": "under",
+          "object": "green cone"
+        },
+        {
+          "subject": "brown box",
+          "relation": "right_of",
+          "object": "red apple"
+        }
+      ],
+      "scene": "playroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the red apple under the green cone?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the brown box to the right of the red apple?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the apple red?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cone green?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_071",
+    "bucket": "complex_composition",
+    "prompt": "A red cube next to a white cup, and a pink flower above the red cube in a studio.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "cube",
+          "attribute": "red"
+        },
+        {
+          "name": "cup",
+          "attribute": "white"
+        },
+        {
+          "name": "flower",
+          "attribute": "pink"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "red cube",
+          "relation": "next_to",
+          "object": "white cup"
+        },
+        {
+          "subject": "pink flower",
+          "relation": "above",
+          "object": "red cube"
+        }
+      ],
+      "scene": "studio",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the red cube next to the white cup?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the pink flower above the red cube?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cube red?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cup white?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_072",
+    "bucket": "complex_composition",
+    "prompt": "A yellow book to the left of a brown box, and a gray cat below the yellow book in a living room.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "book",
+          "attribute": "yellow"
+        },
+        {
+          "name": "box",
+          "attribute": "brown"
+        },
+        {
+          "name": "cat",
+          "attribute": "gray"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "yellow book",
+          "relation": "left_of",
+          "object": "brown box"
+        },
+        {
+          "subject": "gray cat",
+          "relation": "below",
+          "object": "yellow book"
+        }
+      ],
+      "scene": "living room",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the yellow book to the left of the brown box?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the gray cat below the yellow book?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the book yellow?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the box brown?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_073",
+    "bucket": "complex_composition",
+    "prompt": "A orange plate to the right of a pink flower, and a red apple on top of the orange plate in a kitchen.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "plate",
+          "attribute": "orange"
+        },
+        {
+          "name": "flower",
+          "attribute": "pink"
+        },
+        {
+          "name": "apple",
+          "attribute": "red"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "orange plate",
+          "relation": "right_of",
+          "object": "pink flower"
+        },
+        {
+          "subject": "red apple",
+          "relation": "on_top_of",
+          "object": "orange plate"
+        }
+      ],
+      "scene": "kitchen",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the orange plate to the right of the pink flower?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the red apple on top of the orange plate?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the plate orange?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the flower pink?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_074",
+    "bucket": "complex_composition",
+    "prompt": "A striped pillow above a gray cat, and a red cube under the striped pillow in a office.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "pillow",
+          "attribute": "striped"
+        },
+        {
+          "name": "cat",
+          "attribute": "gray"
+        },
+        {
+          "name": "cube",
+          "attribute": "red"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "striped pillow",
+          "relation": "above",
+          "object": "gray cat"
+        },
+        {
+          "subject": "red cube",
+          "relation": "under",
+          "object": "striped pillow"
+        }
+      ],
+      "scene": "office",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the striped pillow above the gray cat?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the red cube under the striped pillow?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the pillow striped?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cat gray?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_075",
+    "bucket": "complex_composition",
+    "prompt": "A wooden chair below a red apple, and a yellow book next to the wooden chair in a bedroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "chair",
+          "attribute": "wooden"
+        },
+        {
+          "name": "apple",
+          "attribute": "red"
+        },
+        {
+          "name": "book",
+          "attribute": "yellow"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "wooden chair",
+          "relation": "below",
+          "object": "red apple"
+        },
+        {
+          "subject": "yellow book",
+          "relation": "next_to",
+          "object": "wooden chair"
+        }
+      ],
+      "scene": "bedroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the wooden chair below the red apple?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the yellow book next to the wooden chair?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the chair wooden?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the apple red?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_076",
+    "bucket": "complex_composition",
+    "prompt": "A brown dog on top of a red cube, and a orange plate to the left of the brown dog in a garden.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "dog",
+          "attribute": "brown"
+        },
+        {
+          "name": "cube",
+          "attribute": "red"
+        },
+        {
+          "name": "plate",
+          "attribute": "orange"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "brown dog",
+          "relation": "on_top_of",
+          "object": "red cube"
+        },
+        {
+          "subject": "orange plate",
+          "relation": "left_of",
+          "object": "brown dog"
+        }
+      ],
+      "scene": "garden",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the brown dog on top of the red cube?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the orange plate to the left of the brown dog?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the dog brown?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cube red?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_077",
+    "bucket": "complex_composition",
+    "prompt": "A round clock under a yellow book, and a striped pillow to the right of the round clock in a classroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "clock",
+          "attribute": "round"
+        },
+        {
+          "name": "book",
+          "attribute": "yellow"
+        },
+        {
+          "name": "pillow",
+          "attribute": "striped"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "round clock",
+          "relation": "under",
+          "object": "yellow book"
+        },
+        {
+          "subject": "striped pillow",
+          "relation": "right_of",
+          "object": "round clock"
+        }
+      ],
+      "scene": "classroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the round clock under the yellow book?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the striped pillow to the right of the round clock?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the clock round?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the book yellow?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_078",
+    "bucket": "complex_composition",
+    "prompt": "A blue sphere next to a orange plate, and a wooden chair above the blue sphere in a shelf.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "sphere",
+          "attribute": "blue"
+        },
+        {
+          "name": "plate",
+          "attribute": "orange"
+        },
+        {
+          "name": "chair",
+          "attribute": "wooden"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "blue sphere",
+          "relation": "next_to",
+          "object": "orange plate"
+        },
+        {
+          "subject": "wooden chair",
+          "relation": "above",
+          "object": "blue sphere"
+        }
+      ],
+      "scene": "shelf",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the blue sphere next to the orange plate?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the wooden chair above the blue sphere?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the sphere blue?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the plate orange?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_079",
+    "bucket": "complex_composition",
+    "prompt": "A black lamp to the left of a striped pillow, and a brown dog below the black lamp in a desk.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "lamp",
+          "attribute": "black"
+        },
+        {
+          "name": "pillow",
+          "attribute": "striped"
+        },
+        {
+          "name": "dog",
+          "attribute": "brown"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "black lamp",
+          "relation": "left_of",
+          "object": "striped pillow"
+        },
+        {
+          "subject": "brown dog",
+          "relation": "below",
+          "object": "black lamp"
+        }
+      ],
+      "scene": "desk",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the black lamp to the left of the striped pillow?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the brown dog below the black lamp?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the lamp black?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the pillow striped?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_080",
+    "bucket": "complex_composition",
+    "prompt": "A purple bottle to the right of a wooden chair, and a round clock on top of the purple bottle in a playroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "bottle",
+          "attribute": "purple"
+        },
+        {
+          "name": "chair",
+          "attribute": "wooden"
+        },
+        {
+          "name": "clock",
+          "attribute": "round"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "purple bottle",
+          "relation": "right_of",
+          "object": "wooden chair"
+        },
+        {
+          "subject": "round clock",
+          "relation": "on_top_of",
+          "object": "purple bottle"
+        }
+      ],
+      "scene": "playroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the purple bottle to the right of the wooden chair?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the round clock on top of the purple bottle?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the bottle purple?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the chair wooden?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_081",
+    "bucket": "complex_composition",
+    "prompt": "A glass vase above a brown dog, and a blue sphere under the glass vase in a studio.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "vase",
+          "attribute": "glass"
+        },
+        {
+          "name": "dog",
+          "attribute": "brown"
+        },
+        {
+          "name": "sphere",
+          "attribute": "blue"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "glass vase",
+          "relation": "above",
+          "object": "brown dog"
+        },
+        {
+          "subject": "blue sphere",
+          "relation": "under",
+          "object": "glass vase"
+        }
+      ],
+      "scene": "studio",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the glass vase above the brown dog?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the blue sphere under the glass vase?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the vase glass?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the dog brown?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_082",
+    "bucket": "complex_composition",
+    "prompt": "A round table below a round clock, and a black lamp next to the round table in a living room.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "table",
+          "attribute": "round"
+        },
+        {
+          "name": "clock",
+          "attribute": "round"
+        },
+        {
+          "name": "lamp",
+          "attribute": "black"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "round table",
+          "relation": "below",
+          "object": "round clock"
+        },
+        {
+          "subject": "black lamp",
+          "relation": "next_to",
+          "object": "round table"
+        }
+      ],
+      "scene": "living room",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the round table below the round clock?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the black lamp next to the round table?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the table round?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the clock round?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_083",
+    "bucket": "complex_composition",
+    "prompt": "A woven basket on top of a blue sphere, and a purple bottle to the left of the woven basket in a kitchen.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "basket",
+          "attribute": "woven"
+        },
+        {
+          "name": "sphere",
+          "attribute": "blue"
+        },
+        {
+          "name": "bottle",
+          "attribute": "purple"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "woven basket",
+          "relation": "on_top_of",
+          "object": "blue sphere"
+        },
+        {
+          "subject": "purple bottle",
+          "relation": "left_of",
+          "object": "woven basket"
+        }
+      ],
+      "scene": "kitchen",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the woven basket on top of the blue sphere?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the purple bottle to the left of the woven basket?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the basket woven?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the sphere blue?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_084",
+    "bucket": "complex_composition",
+    "prompt": "A square mirror under a black lamp, and a glass vase to the right of the square mirror in a office.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "mirror",
+          "attribute": "square"
+        },
+        {
+          "name": "lamp",
+          "attribute": "black"
+        },
+        {
+          "name": "vase",
+          "attribute": "glass"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "square mirror",
+          "relation": "under",
+          "object": "black lamp"
+        },
+        {
+          "subject": "glass vase",
+          "relation": "right_of",
+          "object": "square mirror"
+        }
+      ],
+      "scene": "office",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the square mirror under the black lamp?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the glass vase to the right of the square mirror?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the mirror square?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the lamp black?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_085",
+    "bucket": "complex_composition",
+    "prompt": "A green cone next to a purple bottle, and a round table above the green cone in a bedroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "cone",
+          "attribute": "green"
+        },
+        {
+          "name": "bottle",
+          "attribute": "purple"
+        },
+        {
+          "name": "table",
+          "attribute": "round"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "green cone",
+          "relation": "next_to",
+          "object": "purple bottle"
+        },
+        {
+          "subject": "round table",
+          "relation": "above",
+          "object": "green cone"
+        }
+      ],
+      "scene": "bedroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the green cone next to the purple bottle?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the round table above the green cone?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cone green?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the bottle purple?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_086",
+    "bucket": "complex_composition",
+    "prompt": "A white cup to the left of a glass vase, and a woven basket below the white cup in a garden.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "cup",
+          "attribute": "white"
+        },
+        {
+          "name": "vase",
+          "attribute": "glass"
+        },
+        {
+          "name": "basket",
+          "attribute": "woven"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "white cup",
+          "relation": "left_of",
+          "object": "glass vase"
+        },
+        {
+          "subject": "woven basket",
+          "relation": "below",
+          "object": "white cup"
+        }
+      ],
+      "scene": "garden",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the white cup to the left of the glass vase?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the woven basket below the white cup?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cup white?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the vase glass?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_087",
+    "bucket": "complex_composition",
+    "prompt": "A brown box to the right of a round table, and a square mirror on top of the brown box in a classroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "box",
+          "attribute": "brown"
+        },
+        {
+          "name": "table",
+          "attribute": "round"
+        },
+        {
+          "name": "mirror",
+          "attribute": "square"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "brown box",
+          "relation": "right_of",
+          "object": "round table"
+        },
+        {
+          "subject": "square mirror",
+          "relation": "on_top_of",
+          "object": "brown box"
+        }
+      ],
+      "scene": "classroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the brown box to the right of the round table?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the square mirror on top of the brown box?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the box brown?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the table round?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_088",
+    "bucket": "complex_composition",
+    "prompt": "A pink flower above a woven basket, and a green cone under the pink flower in a shelf.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "flower",
+          "attribute": "pink"
+        },
+        {
+          "name": "basket",
+          "attribute": "woven"
+        },
+        {
+          "name": "cone",
+          "attribute": "green"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "pink flower",
+          "relation": "above",
+          "object": "woven basket"
+        },
+        {
+          "subject": "green cone",
+          "relation": "under",
+          "object": "pink flower"
+        }
+      ],
+      "scene": "shelf",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the pink flower above the woven basket?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the green cone under the pink flower?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the flower pink?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the basket woven?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_089",
+    "bucket": "complex_composition",
+    "prompt": "A gray cat below a square mirror, and a white cup next to the gray cat in a desk.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "cat",
+          "attribute": "gray"
+        },
+        {
+          "name": "mirror",
+          "attribute": "square"
+        },
+        {
+          "name": "cup",
+          "attribute": "white"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "gray cat",
+          "relation": "below",
+          "object": "square mirror"
+        },
+        {
+          "subject": "white cup",
+          "relation": "next_to",
+          "object": "gray cat"
+        }
+      ],
+      "scene": "desk",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the gray cat below the square mirror?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the white cup next to the gray cat?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cat gray?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the mirror square?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_090",
+    "bucket": "complex_composition",
+    "prompt": "A red apple on top of a green cone, and a brown box to the left of the red apple in a playroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "apple",
+          "attribute": "red"
+        },
+        {
+          "name": "cone",
+          "attribute": "green"
+        },
+        {
+          "name": "box",
+          "attribute": "brown"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "red apple",
+          "relation": "on_top_of",
+          "object": "green cone"
+        },
+        {
+          "subject": "brown box",
+          "relation": "left_of",
+          "object": "red apple"
+        }
+      ],
+      "scene": "playroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the red apple on top of the green cone?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the brown box to the left of the red apple?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the apple red?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cone green?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_091",
+    "bucket": "complex_composition",
+    "prompt": "A red cube under a white cup, and a pink flower to the right of the red cube in a studio.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "cube",
+          "attribute": "red"
+        },
+        {
+          "name": "cup",
+          "attribute": "white"
+        },
+        {
+          "name": "flower",
+          "attribute": "pink"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "red cube",
+          "relation": "under",
+          "object": "white cup"
+        },
+        {
+          "subject": "pink flower",
+          "relation": "right_of",
+          "object": "red cube"
+        }
+      ],
+      "scene": "studio",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the red cube under the white cup?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the pink flower to the right of the red cube?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cube red?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cup white?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_092",
+    "bucket": "complex_composition",
+    "prompt": "A yellow book next to a brown box, and a gray cat above the yellow book in a living room.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "book",
+          "attribute": "yellow"
+        },
+        {
+          "name": "box",
+          "attribute": "brown"
+        },
+        {
+          "name": "cat",
+          "attribute": "gray"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "yellow book",
+          "relation": "next_to",
+          "object": "brown box"
+        },
+        {
+          "subject": "gray cat",
+          "relation": "above",
+          "object": "yellow book"
+        }
+      ],
+      "scene": "living room",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the yellow book next to the brown box?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the gray cat above the yellow book?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the book yellow?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the box brown?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_093",
+    "bucket": "complex_composition",
+    "prompt": "A orange plate to the left of a pink flower, and a red apple below the orange plate in a kitchen.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "plate",
+          "attribute": "orange"
+        },
+        {
+          "name": "flower",
+          "attribute": "pink"
+        },
+        {
+          "name": "apple",
+          "attribute": "red"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "orange plate",
+          "relation": "left_of",
+          "object": "pink flower"
+        },
+        {
+          "subject": "red apple",
+          "relation": "below",
+          "object": "orange plate"
+        }
+      ],
+      "scene": "kitchen",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the orange plate to the left of the pink flower?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the red apple below the orange plate?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the plate orange?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the flower pink?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_094",
+    "bucket": "complex_composition",
+    "prompt": "A striped pillow to the right of a gray cat, and a red cube on top of the striped pillow in a office.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "pillow",
+          "attribute": "striped"
+        },
+        {
+          "name": "cat",
+          "attribute": "gray"
+        },
+        {
+          "name": "cube",
+          "attribute": "red"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "striped pillow",
+          "relation": "right_of",
+          "object": "gray cat"
+        },
+        {
+          "subject": "red cube",
+          "relation": "on_top_of",
+          "object": "striped pillow"
+        }
+      ],
+      "scene": "office",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the striped pillow to the right of the gray cat?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the red cube on top of the striped pillow?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the pillow striped?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cat gray?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_095",
+    "bucket": "complex_composition",
+    "prompt": "A wooden chair above a red apple, and a yellow book under the wooden chair in a bedroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "chair",
+          "attribute": "wooden"
+        },
+        {
+          "name": "apple",
+          "attribute": "red"
+        },
+        {
+          "name": "book",
+          "attribute": "yellow"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "wooden chair",
+          "relation": "above",
+          "object": "red apple"
+        },
+        {
+          "subject": "yellow book",
+          "relation": "under",
+          "object": "wooden chair"
+        }
+      ],
+      "scene": "bedroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the wooden chair above the red apple?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the yellow book under the wooden chair?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the chair wooden?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the apple red?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_096",
+    "bucket": "complex_composition",
+    "prompt": "A brown dog below a red cube, and a orange plate next to the brown dog in a garden.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "dog",
+          "attribute": "brown"
+        },
+        {
+          "name": "cube",
+          "attribute": "red"
+        },
+        {
+          "name": "plate",
+          "attribute": "orange"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "brown dog",
+          "relation": "below",
+          "object": "red cube"
+        },
+        {
+          "subject": "orange plate",
+          "relation": "next_to",
+          "object": "brown dog"
+        }
+      ],
+      "scene": "garden",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the brown dog below the red cube?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the orange plate next to the brown dog?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the dog brown?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the cube red?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_097",
+    "bucket": "complex_composition",
+    "prompt": "A round clock on top of a yellow book, and a striped pillow to the left of the round clock in a classroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "clock",
+          "attribute": "round"
+        },
+        {
+          "name": "book",
+          "attribute": "yellow"
+        },
+        {
+          "name": "pillow",
+          "attribute": "striped"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "round clock",
+          "relation": "on_top_of",
+          "object": "yellow book"
+        },
+        {
+          "subject": "striped pillow",
+          "relation": "left_of",
+          "object": "round clock"
+        }
+      ],
+      "scene": "classroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the round clock on top of the yellow book?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the striped pillow to the left of the round clock?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the clock round?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the book yellow?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_098",
+    "bucket": "complex_composition",
+    "prompt": "A blue sphere under a orange plate, and a wooden chair to the right of the blue sphere in a shelf.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "sphere",
+          "attribute": "blue"
+        },
+        {
+          "name": "plate",
+          "attribute": "orange"
+        },
+        {
+          "name": "chair",
+          "attribute": "wooden"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "blue sphere",
+          "relation": "under",
+          "object": "orange plate"
+        },
+        {
+          "subject": "wooden chair",
+          "relation": "right_of",
+          "object": "blue sphere"
+        }
+      ],
+      "scene": "shelf",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the blue sphere under the orange plate?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the wooden chair to the right of the blue sphere?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the sphere blue?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the plate orange?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_099",
+    "bucket": "complex_composition",
+    "prompt": "A black lamp next to a striped pillow, and a brown dog above the black lamp in a desk.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "lamp",
+          "attribute": "black"
+        },
+        {
+          "name": "pillow",
+          "attribute": "striped"
+        },
+        {
+          "name": "dog",
+          "attribute": "brown"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "black lamp",
+          "relation": "next_to",
+          "object": "striped pillow"
+        },
+        {
+          "subject": "brown dog",
+          "relation": "above",
+          "object": "black lamp"
+        }
+      ],
+      "scene": "desk",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the black lamp next to the striped pillow?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the brown dog above the black lamp?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the lamp black?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the pillow striped?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  },
+  {
+    "id": "complex_100",
+    "bucket": "complex_composition",
+    "prompt": "A purple bottle to the left of a wooden chair, and a round clock below the purple bottle in a playroom.",
+    "metadata": {
+      "objects": [
+        {
+          "name": "bottle",
+          "attribute": "purple"
+        },
+        {
+          "name": "chair",
+          "attribute": "wooden"
+        },
+        {
+          "name": "clock",
+          "attribute": "round"
+        }
+      ],
+      "counts": [],
+      "relations": [
+        {
+          "subject": "purple bottle",
+          "relation": "left_of",
+          "object": "wooden chair"
+        },
+        {
+          "subject": "round clock",
+          "relation": "below",
+          "object": "purple bottle"
+        }
+      ],
+      "scene": "playroom",
+      "target_skill": "complex_composition",
+      "source_schema": "target_only_v2",
+      "selection_policy": "four core target constraints chosen from count, relation, and attribute questions"
+    },
+    "target_questions": [
+      {
+        "type": "relation",
+        "question": "Is the purple bottle to the left of the wooden chair?",
+        "answer": "yes"
+      },
+      {
+        "type": "relation",
+        "question": "Is the round clock below the purple bottle?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the bottle purple?",
+        "answer": "yes"
+      },
+      {
+        "type": "attribute",
+        "question": "Is the chair wooden?",
+        "answer": "yes"
+      }
+    ],
+    "reward_rule": {
+      "type": "normalized_target_accuracy",
+      "formula": "correct_target_questions / 4",
+      "max_reward": 1.0,
+      "min_reward": 0.0,
+      "vlm_answer_space": [
+        "yes",
+        "no",
+        "uncertain"
+      ],
+      "uncertain_score": 0.0
+    }
+  }
+]

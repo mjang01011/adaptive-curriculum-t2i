@@ -1,0 +1,259 @@
+"""
+Core curriculum training loop shared by all strategies.
+"""
+import time
+from pathlib import Path
+from typing import Dict, Optional
+
+from adaptive_curriculum.utils.seed import set_seed
+from adaptive_curriculum.utils.paths import make_run_dir
+from adaptive_curriculum.utils.logging import RunLogger
+from adaptive_curriculum.utils.checkpointing import save_sampler_state
+from adaptive_curriculum.utils.jsonl import write_json
+from adaptive_curriculum.utils.plots import generate_all_plots
+from adaptive_curriculum.train.evaluate_buckets import evaluate_bucket, evaluate_all_buckets
+
+
+def build_sampler(strategy: str, bucket_names: list, config):
+    if strategy == "uniform":
+        from adaptive_curriculum.curriculum.uniform_sampler import UniformSampler
+        return UniformSampler(bucket_names)
+    elif strategy == "static":
+        from adaptive_curriculum.curriculum.static_sampler import StaticSampler
+        phases = [
+            {"buckets": p["buckets"], "steps": p["steps"]}
+            for p in config.static_curriculum.phases
+        ]
+        return StaticSampler(phases)
+    elif strategy == "ucb":
+        from adaptive_curriculum.curriculum.ucb_sampler import UCBSampler
+        return UCBSampler(
+            bucket_names=bucket_names,
+            c=config.ucb.c,
+            reward_ma_beta=config.ucb.reward_ma_beta,
+            improvement_ma_beta=config.ucb.improvement_ma_beta,
+        )
+    else:
+        raise ValueError(f"Unknown strategy: {strategy}")
+
+
+def run_curriculum_training(config, strategy: str, output_root: Optional[str] = None) -> str:
+    set_seed(config.seed)
+
+    output_root = output_root or config.paths.output_root
+    run_dir = make_run_dir(output_root, strategy, config.project_name)
+    print(f"[train] Run dir: {run_dir}")
+
+    # save resolved config
+    import yaml, dataclasses
+    try:
+        from omegaconf import OmegaConf
+        OmegaConf.save(config, str(run_dir / "config_resolved.yaml"))
+    except Exception:
+        pass
+
+    logger = RunLogger(
+        run_dir=str(run_dir),
+        strategy=strategy,
+        use_wandb=getattr(getattr(config, "logging", None), "use_wandb", False),
+    )
+
+    bucket_names = list(config.buckets.names)
+
+    # build datasets
+    from adaptive_curriculum.data.bucket_dataset import load_bucket_datasets
+    data_root = getattr(config.paths, "data_root", "/vol/data")
+    datasets = load_bucket_datasets(
+        data_root=data_root,
+        bucket_names=bucket_names,
+        train_file=config.buckets.train_file,
+        val_file=config.buckets.val_file,
+        max_val_prompts=getattr(config.evaluation, "num_val_prompts_per_bucket", None),
+    )
+
+    # load T5 embedding cache if available (eliminates T5 from eval hot path)
+    t5_cache_dir = getattr(config.paths, "t5_cache_dir", None)
+    t5_cache = None
+    if t5_cache_dir and t5_cache_dir != "null":
+        from adaptive_curriculum.data.t5_cache import load_t5_cache
+        t5_cache = load_t5_cache(t5_cache_dir, bucket_names)
+        if t5_cache:
+            print(f"[train] T5 cache loaded from {t5_cache_dir}")
+        else:
+            print(f"[train] T5 cache not found at {t5_cache_dir}, will use live T5 inference")
+
+    # build reward model
+    from adaptive_curriculum.reward.vlm_reward import build_reward_model
+    reward_model = build_reward_model(config)
+
+    # build model (None for no-GPU dry runs)
+    use_real_model = getattr(config, "_use_real_model", True)
+    model = None
+    if use_real_model:
+        from adaptive_curriculum.model.llamagen_wrapper import LlamaGenWrapper
+        lora_cfg = {
+            "rank": config.lora.rank,
+            "alpha": config.lora.alpha,
+            "dropout": config.lora.dropout,
+            "target_modules": list(config.lora.get("target_modules", ["wqkv", "wo"])),
+        } if config.model.use_lora else None
+        model = LlamaGenWrapper(
+            repo_root=config.paths.repo_root,
+            vq_ckpt=config.model.vq_ckpt,
+            gpt_ckpt=config.model.gpt_ckpt,
+            gpt_model=config.model.gpt_model,
+            image_size=config.model.image_size,
+            t5_path=config.model.t5_path,
+            t5_model_type=config.model.t5_model_type,
+            t5_feature_max_len=config.model.t5_feature_max_len,
+            precision=config.model.mixed_precision,
+            use_lora=config.model.use_lora,
+            lora_config=lora_cfg,
+            learning_rate=config.training.learning_rate,
+            max_grad_norm=config.training.max_grad_norm,
+        )
+
+    # build curriculum sampler
+    sampler = build_sampler(strategy, bucket_names, config)
+
+    # initial evaluation
+    print("[train] Running initial bucket evaluation...")
+    evals_dir = str(run_dir / "evals")
+    initial_results = evaluate_all_buckets(
+        model=model,
+        reward_model=reward_model,
+        datasets=datasets,
+        out_dir=evals_dir,
+        curriculum_step=-1,
+        num_samples_per_prompt=config.evaluation.num_samples_per_prompt,
+        seed=config.seed,
+        t5_cache=t5_cache,
+    )
+    initial_scores = {b: r["mean_raw_reward"] for b, r in initial_results.items()}
+    sampler.initialize_rewards(initial_scores)
+    print(f"[train] Initial scores: {initial_scores}")
+
+    num_steps = config.training.num_curriculum_steps
+    grad_steps_per = config.training.gradient_steps_per_curriculum_step
+    train_batch_size = config.training.train_batch_size
+    save_every = config.training.save_every
+    full_eval_every = config.evaluation.full_eval_every_curriculum_step
+    num_samples = config.evaluation.num_samples_per_prompt
+
+    total_generated = 0
+    t_start = time.time()
+    best_avg_reward = -float("inf")
+    best_checkpoint = None
+
+    for step in range(num_steps):
+        # 1. Choose bucket
+        bucket = sampler.choose_bucket(step)
+
+        # 2. Train K gradient steps
+        train_metrics_list = []
+        if model is not None:
+            model.gpt.train()
+            for _ in range(grad_steps_per):
+                batch = datasets[bucket].sample_train_batch(train_batch_size)
+                if batch:
+                    metrics = model.train_supervised_step(batch)
+                    train_metrics_list.append(metrics)
+
+        if train_metrics_list:
+            avg_loss = sum(m["loss"] for m in train_metrics_list) / len(train_metrics_list)
+            logger.log_train_metrics(step, bucket, {
+                "avg_loss": avg_loss,
+                "lr": train_metrics_list[-1].get("lr", 0),
+                "grad_norm": train_metrics_list[-1].get("grad_norm", 0),
+            })
+
+        # 3. Evaluate selected bucket
+        bucket_eval_dir = str(run_dir / "evals" / f"step_{step:06d}" / bucket)
+        bucket_summary = evaluate_bucket(
+            model=model,
+            reward_model=reward_model,
+            val_items=datasets[bucket].val_items,
+            out_dir=bucket_eval_dir,
+            num_samples_per_prompt=num_samples,
+            seed=config.seed,
+            t5_cache=t5_cache,
+        )
+        total_generated += bucket_summary["num_images"]
+
+        # 4. Update sampler
+        reward_info = {
+            "raw_reward": bucket_summary["mean_raw_reward"],
+            "eval_summary": bucket_summary,
+        }
+        sampler.update(bucket, reward_info)
+
+        # 5. Log
+        ucb_scores = sampler.get_scores() if hasattr(sampler, "get_scores") else {}
+        bucket_stats = sampler.get_stats_dict() if hasattr(sampler, "get_stats_dict") else {}
+        logger.log_curriculum_decision(step, bucket, ucb_scores, bucket_stats)
+        logger.log_bucket_eval(step, bucket_summary)
+
+        print(
+            f"[step {step:4d}/{num_steps}] bucket={bucket:25s}  "
+            f"reward={bucket_summary['mean_raw_reward']:.4f}"
+        )
+
+        # 6. Periodic full evaluation
+        if step % full_eval_every == 0:
+            all_results = evaluate_all_buckets(
+                model=model,
+                reward_model=reward_model,
+                datasets=datasets,
+                out_dir=evals_dir,
+                curriculum_step=step,
+                num_samples_per_prompt=num_samples,
+                seed=config.seed,
+                t5_cache=t5_cache,
+            )
+            avg_reward = sum(r["mean_raw_reward"] for r in all_results.values()) / len(all_results)
+            if avg_reward > best_avg_reward:
+                best_avg_reward = avg_reward
+                if model is not None:
+                    best_checkpoint = str(run_dir / "checkpoints" / f"best.pt")
+                    model.save_checkpoint(best_checkpoint)
+
+        # 7. Checkpoint
+        if step % save_every == 0:
+            if model is not None:
+                ckpt_path = str(run_dir / "checkpoints" / f"step_{step:06d}.pt")
+                model.save_checkpoint(ckpt_path)
+                if best_checkpoint is None:
+                    best_checkpoint = ckpt_path
+            save_sampler_state(sampler, str(run_dir / "checkpoints" / f"sampler_step_{step:06d}.json"))
+
+    # final evaluation
+    final_results = evaluate_all_buckets(
+        model=model,
+        reward_model=reward_model,
+        datasets=datasets,
+        out_dir=evals_dir,
+        curriculum_step=num_steps,
+        num_samples_per_prompt=num_samples,
+        seed=config.seed,
+        t5_cache=t5_cache,
+    )
+    final_bucket_rewards = {b: r["mean_raw_reward"] for b, r in final_results.items()}
+    avg_final = sum(final_bucket_rewards.values()) / len(final_bucket_rewards)
+
+    total_gpu_secs = time.time() - t_start
+    summary = {
+        "strategy": strategy,
+        "final_bucket_rewards": final_bucket_rewards,
+        "average_final_reward": avg_final,
+        "best_checkpoint": best_checkpoint,
+        "total_gpu_seconds": total_gpu_secs,
+        "total_generated_images": total_generated,
+    }
+    write_json(str(run_dir / "final_summary.json"), summary)
+    print(f"\n[train] Done. avg_final_reward={avg_final:.4f}  run_dir={run_dir}")
+
+    # plots
+    generate_all_plots(str(run_dir), bucket_names)
+
+    logger.finish()
+    return str(run_dir)

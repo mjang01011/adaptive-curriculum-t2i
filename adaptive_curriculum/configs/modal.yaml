@@ -1,0 +1,14 @@
+modal:
+  app_name: llamagen-adaptive-curriculum
+  volume_name: llamagen-curriculum
+  gpu: A100
+  timeout_hours: 12
+  python_version: "3.11"
+
+volume_layout:
+  repo: /vol/repo/LlamaGen
+  pretrained_models: /vol/pretrained_models
+  data: /vol/data
+  outputs: /vol/outputs/runs
+  reward_cache: /vol/reward_cache
+  hf_cache: /vol/hf_cache

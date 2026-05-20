@@ -1,0 +1,41 @@
+{
+  "bucket": "attribute_binding",
+  "target_only": true,
+  "target_question_count_per_prompt": 4,
+  "description": "Only evaluates whether the correct attribute is bound to the correct object. No object existence/support questions.",
+  "templates": [
+    {
+      "type": "attribute",
+      "template": "Is the {object1} {attribute1}?",
+      "answer": "yes"
+    },
+    {
+      "type": "attribute",
+      "template": "Is the {object2} {attribute2}?",
+      "answer": "yes"
+    },
+    {
+      "type": "anti_swap",
+      "template": "Is the {object1} {attribute2}?",
+      "answer": "no"
+    },
+    {
+      "type": "anti_swap",
+      "template": "Is the {object2} {attribute1}?",
+      "answer": "no"
+    }
+  ],
+  "reward_rule": {
+    "type": "normalized_target_accuracy",
+    "formula": "correct_target_questions / 4",
+    "max_reward": 1.0,
+    "min_reward": 0.0,
+    "vlm_answer_space": [
+      "yes",
+      "no",
+      "uncertain"
+    ],
+    "uncertain_score": 0.0
+  },
+  "ucb_note": "Prompt rewards are normalized to [0, 1]. Bucket score is mean prompt reward."
+}

@@ -1,0 +1,30 @@
+buckets:
+  attribute_binding:
+    description: "Attribute-to-object binding (color, size, material)"
+    difficulty: easy
+    eval_question_types:
+      - object_presence
+      - attribute_binding
+
+  counting:
+    description: "Counting objects (one, two, three, several)"
+    difficulty: medium
+    eval_question_types:
+      - object_presence
+      - counting
+
+  spatial_relations:
+    description: "Spatial relationships (left, right, above, below, near, far)"
+    difficulty: medium
+    eval_question_types:
+      - object_presence
+      - spatial_relation
+
+  complex_composition:
+    description: "Multiple objects with attributes and spatial relations"
+    difficulty: hard
+    eval_question_types:
+      - object_presence
+      - attribute_binding
+      - spatial_relation
+      - counting

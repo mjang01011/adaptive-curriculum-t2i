@@ -1,0 +1,53 @@
+{
+  "bucket": "spatial_relations",
+  "target_only": true,
+  "target_question_count_per_prompt": 2,
+  "description": "Only evaluates spatial relation correctness. No object existence, color/attribute, or scene support questions.",
+  "relations": {
+    "left_of": "to the left of",
+    "right_of": "to the right of",
+    "above": "above",
+    "below": "below",
+    "on_top_of": "on top of",
+    "under": "under",
+    "inside": "inside",
+    "next_to": "next to",
+    "between": "between"
+  },
+  "inverse_relations": {
+    "left_of": "right_of",
+    "right_of": "left_of",
+    "above": "below",
+    "below": "above",
+    "on_top_of": "under",
+    "under": "on_top_of",
+    "inside": "outside_of",
+    "next_to": "far_from",
+    "between": "outside_of"
+  },
+  "templates": [
+    {
+      "type": "relation",
+      "template": "Is the {subject} {relation_phrase} the {object}?",
+      "answer": "yes"
+    },
+    {
+      "type": "anti_relation",
+      "template": "Is the {subject} {opposite_or_negative_relation_phrase} the {object}?",
+      "answer": "no"
+    }
+  ],
+  "reward_rule": {
+    "type": "normalized_target_accuracy",
+    "formula": "correct_target_questions / 2",
+    "max_reward": 1.0,
+    "min_reward": 0.0,
+    "vlm_answer_space": [
+      "yes",
+      "no",
+      "uncertain"
+    ],
+    "uncertain_score": 0.0
+  },
+  "ucb_note": "Prompt rewards are normalized to [0, 1]. Bucket score is mean prompt reward."
+}
