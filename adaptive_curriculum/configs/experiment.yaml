@@ -32,6 +32,7 @@ lora:
   rank: 8
   alpha: 16
   dropout: 0.05
+  start_layer: 18       # inject only on layers 18-35; shortens backward path to avoid float32 overflow
   target_modules:
     - wqkv
     - wo

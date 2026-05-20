@@ -52,14 +52,17 @@ def inject_lora(
     rank: int = 8,
     alpha: float = 16.0,
     dropout: float = 0.05,
+    start_layer: int = 0,
 ) -> nn.Module:
     """
     Replace every nn.Linear whose name ends with one of target_modules with LoRALinear.
+    start_layer: only inject on layers >= this index (e.g. 18 to target the last 18 of 36).
+    Restricting to later layers shortens the backward path and avoids float32 overflow.
     Returns the model with LoRA injected (in-place on module tree).
     """
+    import re
     replaced = 0
     for name, module in list(model.named_modules()):
-        # get parent and attribute name
         parts = name.split(".")
         if not parts:
             continue
@@ -68,6 +71,12 @@ def inject_lora(
             continue
         if not isinstance(module, nn.Linear):
             continue
+
+        # skip layers below start_layer
+        if start_layer > 0:
+            m = re.search(r'layers\.(\d+)', name)
+            if m and int(m.group(1)) < start_layer:
+                continue
 
         # navigate to parent
         parent = model
@@ -81,7 +90,7 @@ def inject_lora(
         setattr(parent, attr, lora_mod)
         replaced += 1
 
-    print(f"[LoRA] Replaced {replaced} linear layers with LoRA (rank={rank}, alpha={alpha})")
+    print(f"[LoRA] Replaced {replaced} linear layers with LoRA (rank={rank}, alpha={alpha}, start_layer={start_layer})")
     return model
 
 
