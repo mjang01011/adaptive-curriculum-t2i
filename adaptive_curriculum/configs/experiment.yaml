@@ -85,7 +85,7 @@ static_curriculum:
       steps: 50
 
 logging:
-  use_wandb: false
+  use_wandb: true
   wandb_project: llamagen-adaptive-curriculum
   wandb_entity: null        # your W&B username or team
   run_name: null            # auto-generated from run dir if null
