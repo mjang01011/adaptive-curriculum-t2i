@@ -551,6 +551,9 @@ class LlamaGenWrapper:
         flat_advantages = advantages.reshape(-1).to(self.device)  # (B * num_samples,)
 
         # 6. KL reference log probs (no grad, base model)
+        # Cast to float32 first: _compute_log_probs hardcodes c_indices.float() for conditioning,
+        # so the model must also be float32 to avoid a dtype mismatch in F.linear.
+        self.gpt.float()
         kl_loss = torch.tensor(0.0, device=self.device)
         ref_log_probs = None
         if beta > 0.0:
@@ -558,9 +561,6 @@ class LlamaGenWrapper:
                 ref_log_probs = self._compute_log_probs_ref(stacked_tokens, rep_c, rep_masks, cfg_scale=1.0)
 
         # 7. Chunked gradient accumulation — avoids OOM from full B*G forward with grad
-        # Cast to float32: bfloat16 backward through frozen layers overflows to NaN.
-        # Cast back after optimizer step.
-        self.gpt.float()
         # Log probs use conditional-only forward (cfg_scale=1.0): zero unconditional conditioning
         # causes NaN intermediate activations in cls_embedding which corrupt the backward.
         # Tokens were generated with CFG for quality; log probs under conditional model
