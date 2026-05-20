@@ -379,6 +379,11 @@ class LlamaGenWrapper:
         c_emb_masks = torch.flip(emb_masks, dims=[-1])
         return c_indices, c_emb_masks
 
+    def _disable_kv_cache(self):
+        """Clear KV cache set up by generate() so training forward pass works."""
+        for block in self.gpt.layers:
+            block.attention.kv_cache = None
+
     def _compute_log_probs(self, image_tokens, c_indices, c_emb_masks):
         """
         Full forward pass → mean per-token log prob for each sequence.
@@ -464,6 +469,9 @@ class LlamaGenWrapper:
                 for i in range(B):
                     img_t = (decoded[i].float().clamp(-1, 1) + 1) / 2  # (C,H,W) in [0,1]
                     all_pil_imgs.append(TF.to_pil_image(img_t.cpu()))
+
+        # disable KV cache set up by generate() before training forward pass
+        self._disable_kv_cache()
 
         # 3. Score all images with reward model (PIL, no file paths)
         rewards = torch.zeros(B, num_samples)
