@@ -394,19 +394,22 @@ class LlamaGenWrapper:
         # must be in train mode so model trims logits to (B, seq_len, vocab_size)
         self.gpt.train()
         tokens_long = image_tokens.long()
-        use_amp = self.precision in ("bf16", "fp16")
-        with autocast(dtype=self.dtype, enabled=use_amp):
+        # fp32 throughout — bfloat16 can overflow to NaN in deep transformer backward pass
+        c_fp32 = c_indices.float()
+        with autocast(dtype=torch.float32, enabled=False):
             logits, _ = self.gpt(
                 idx=tokens_long[:, :-1],
-                cond_idx=c_indices,
+                cond_idx=c_fp32,
                 input_pos=None,
-                targets=None,   # skip internal cross entropy — we compute our own
+                targets=None,
                 mask=None,
                 valid=None,
             )
         # in train mode: logits[:, cls_token_num-1:] → (B, seq_len, vocab_size)
         log_p = F.log_softmax(logits.float(), dim=-1)
         token_lp = log_p.gather(-1, tokens_long.unsqueeze(-1)).squeeze(-1)  # (B, seq_len)
+        # nan_to_num handles both NaN and -inf from zero-probability tokens
+        token_lp = token_lp.nan_to_num(nan=-20.0, neginf=-20.0)
         return token_lp.mean(dim=-1)  # (B,) mean over tokens
 
     def _compute_log_probs_ref(self, image_tokens, c_indices, c_emb_masks):
@@ -456,7 +459,7 @@ class LlamaGenWrapper:
                 index_sample = generate(
                     self.gpt, c_indices, self.latent_size ** 2,
                     c_emb_masks,
-                    cfg_scale=self.cfg_scale,
+                    cfg_scale=1.0,   # no CFG during GRPO — log probs must match generation dist
                     temperature=self.temperature,
                     top_k=self.top_k,
                     top_p=self.top_p,
