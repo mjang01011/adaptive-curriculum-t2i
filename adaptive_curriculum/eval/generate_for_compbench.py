@@ -105,13 +105,42 @@ def _load_compbench_json(path: Path) -> List[dict]:
     return items
 
 
-def _load_compbench_dir(prompts_dir: Path) -> List[dict]:
-    """Load all *.json files from a T2I-CompBench++ prompts/ directory."""
+def _load_compbench_txt(path: Path) -> List[dict]:
+    """T2I-CompBench++ .txt format: one prompt per line, category = filename stem."""
+    category = path.stem
     items = []
-    for json_file in sorted(prompts_dir.glob("*.json")):
-        items.extend(_load_compbench_json(json_file))
-    print(f"[prompts] Loaded {len(items)} prompts from {prompts_dir} "
-          f"({len(set(it['category'] for it in items))} categories)")
+    with open(path, "r", encoding="utf-8") as f:
+        for i, line in enumerate(f):
+            line = line.strip()
+            if line:
+                items.append({"id": str(i).zfill(5), "prompt": line, "category": category})
+    return items
+
+
+# Main category files in T2I-CompBench++ examples/dataset/ (no _train/_val suffix)
+COMPBENCH_MAIN_FILES = [
+    "color.txt", "shape.txt", "texture.txt",
+    "spatial.txt", "3d_spatial.txt",
+    "non_spatial.txt", "complex.txt", "numeracy.txt",
+]
+
+
+def _load_compbench_dir(prompts_dir: Path) -> List[dict]:
+    """
+    Load T2I-CompBench++ prompts from examples/dataset/ directory.
+    Uses the main evaluation files only (not _train/_val splits).
+    """
+    items = []
+    found = []
+    for fname in COMPBENCH_MAIN_FILES:
+        fpath = prompts_dir / fname
+        if fpath.exists():
+            batch = _load_compbench_txt(fpath)
+            items.extend(batch)
+            found.append(f"{fname}({len(batch)})")
+        else:
+            print(f"  [warn] {fname} not found in {prompts_dir}, skipping")
+    print(f"[prompts] Loaded {len(items)} prompts: {', '.join(found)}")
     return items
 
 
@@ -136,6 +165,8 @@ def _load_prompts(prompts_path: str) -> List[dict]:
         raise FileNotFoundError(f"Prompts path not found: {p}")
     if p.is_dir():
         return _load_compbench_dir(p)
+    if p.suffix == ".txt":
+        return _load_compbench_txt(p)
     if p.suffix == ".jsonl":
         return _load_jsonl(p)
     return _load_compbench_json(p)

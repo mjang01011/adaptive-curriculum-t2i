@@ -31,15 +31,15 @@ if [ ! -d "$COMPBENCH_DIR" ]; then
     git clone https://github.com/Karine-Huang/T2I-CompBench $COMPBENCH_DIR
 fi
 
-PROMPTS_DIR=$COMPBENCH_DIR/prompts
+PROMPTS_DIR=$COMPBENCH_DIR/examples/dataset
 if [ ! -d "$PROMPTS_DIR" ]; then
-    echo "ERROR: $PROMPTS_DIR not found after clone. Check repo structure."
+    echo "ERROR: $PROMPTS_DIR not found. Check repo structure."
     exit 1
 fi
 
 echo "[setup] Using prompts from: $PROMPTS_DIR"
 echo "[setup] Prompt files:"
-ls $PROMPTS_DIR/*.json 2>/dev/null || echo "  (no .json files found — check repo)"
+ls $PROMPTS_DIR/*.txt 2>/dev/null | xargs -n1 basename | tr '\n' ' '; echo
 
 # ── Step 2: generate images with base LlamaGen (no LoRA) ──────────────────────
 OUT_DIR=/viscam/u/jj277/adaptive-curriculum-t2i/outputs/compbench_eval
