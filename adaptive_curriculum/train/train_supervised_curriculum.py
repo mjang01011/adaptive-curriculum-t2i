@@ -164,7 +164,7 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
 
         train_metrics_list = []
         if model is not None:
-            for _ in range(grad_steps_per):
+            for g in range(grad_steps_per):
                 batch = datasets[bucket].sample_train_batch(train_batch_size)
                 if batch:
                     metrics = model.train_grpo_step(
@@ -175,6 +175,9 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
                         t5_cache=t5_cache,
                     )
                     train_metrics_list.append(metrics)
+                    if (g + 1) % 4 == 0:
+                        print(f"  [grpo {g+1}/{grad_steps_per}] loss={metrics['loss']:.4f}  "
+                              f"reward={metrics['mean_reward']:.3f}  grad_norm={metrics['grad_norm']:.3f}")
 
         if train_metrics_list:
             avg_loss = sum(m["loss"] for m in train_metrics_list) / len(train_metrics_list)
