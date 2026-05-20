@@ -74,7 +74,10 @@ def inject_lora(
         for p in parts[:-1]:
             parent = getattr(parent, p)
 
+        device = next(module.parameters()).device
+        dtype = next(module.parameters()).dtype
         lora_mod = LoRALinear(module, rank=rank, alpha=alpha, dropout=dropout)
+        lora_mod = lora_mod.to(device=device, dtype=dtype)
         setattr(parent, attr, lora_mod)
         replaced += 1
 
