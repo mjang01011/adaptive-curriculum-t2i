@@ -1,8 +1,9 @@
 {
   "bucket": "attribute_binding",
   "target_only": true,
+  "description": "Pure attribute-binding bucket. Prompts contain two attributed objects and no explicit count or spatial relation. Reward only checks attribute-to-object binding and anti-swaps.",
   "target_question_count_per_prompt": 4,
-  "description": "Only evaluates whether the correct attribute is bound to the correct object. No object existence/support questions.",
+  "prompt_reward_rule": "correct_target_questions / 4",
   "templates": [
     {
       "type": "attribute",
@@ -35,7 +36,8 @@
       "no",
       "uncertain"
     ],
-    "uncertain_score": 0.0
+    "uncertain_score": 0.0,
+    "note": "Use only target_questions for reward computation."
   },
-  "ucb_note": "Prompt rewards are normalized to [0, 1]. Bucket score is mean prompt reward."
+  "non_overlap_note": "No target questions about counting, spatial relations, object existence, or scene context."
 }

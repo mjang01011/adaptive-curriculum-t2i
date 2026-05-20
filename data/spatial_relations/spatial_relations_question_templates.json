@@ -1,8 +1,9 @@
 {
   "bucket": "spatial_relations",
   "target_only": true,
+  "description": "Pure spatial-relation bucket. Prompts contain one subject, one object, and one relation. Reward only checks the relation and its inverse/negative.",
   "target_question_count_per_prompt": 2,
-  "description": "Only evaluates spatial relation correctness. No object existence, color/attribute, or scene support questions.",
+  "prompt_reward_rule": "correct_target_questions / 2",
   "relations": {
     "left_of": "to the left of",
     "right_of": "to the right of",
@@ -10,9 +11,7 @@
     "below": "below",
     "on_top_of": "on top of",
     "under": "under",
-    "inside": "inside",
-    "next_to": "next to",
-    "between": "between"
+    "inside": "inside"
   },
   "inverse_relations": {
     "left_of": "right_of",
@@ -21,9 +20,7 @@
     "below": "above",
     "on_top_of": "under",
     "under": "on_top_of",
-    "inside": "outside_of",
-    "next_to": "far_from",
-    "between": "outside_of"
+    "inside": "outside_of"
   },
   "templates": [
     {
@@ -33,7 +30,7 @@
     },
     {
       "type": "anti_relation",
-      "template": "Is the {subject} {opposite_or_negative_relation_phrase} the {object}?",
+      "template": "Is the {subject} {inverse_or_negative_relation_phrase} the {object}?",
       "answer": "no"
     }
   ],
@@ -47,7 +44,8 @@
       "no",
       "uncertain"
     ],
-    "uncertain_score": 0.0
+    "uncertain_score": 0.0,
+    "note": "Use only target_questions for reward computation."
   },
-  "ucb_note": "Prompt rewards are normalized to [0, 1]. Bucket score is mean prompt reward."
+  "non_overlap_note": "No target questions about attributes, counts, object existence, or scene context."
 }

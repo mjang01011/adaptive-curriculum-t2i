@@ -1,8 +1,9 @@
 {
   "bucket": "counting",
   "target_only": true,
+  "description": "Pure counting bucket. Prompts contain only object count and object noun. No color, material, scene-specific relation, or spatial relation is evaluated.",
   "target_question_count_per_prompt": 2,
-  "description": "Only evaluates exact target count. No color/attribute, scene, relation, or object-existence support questions.",
+  "prompt_reward_rule": "correct_target_questions / 2",
   "templates": [
     {
       "type": "count",
@@ -25,7 +26,8 @@
       "no",
       "uncertain"
     ],
-    "uncertain_score": 0.0
+    "uncertain_score": 0.0,
+    "note": "Use only target_questions for reward computation."
   },
-  "ucb_note": "Prompt rewards are normalized to [0, 1]. Bucket score is mean prompt reward."
+  "non_overlap_note": "No target questions about attributes, spatial relations, object existence, or scene context."
 }

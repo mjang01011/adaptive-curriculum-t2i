@@ -1,28 +1,29 @@
 {
   "bucket": "complex_composition",
   "target_only": true,
+  "description": "Complex composition bucket intentionally combines multiple compositional constraints. Each prompt has one count, two attribute bindings, and one spatial relation. This is the only intentionally mixed-skill bucket.",
   "target_question_count_per_prompt": 4,
-  "description": "Evaluates four core composition constraints per prompt. Unlike pure buckets, complex intentionally mixes counts, relations, and/or attributes. No support questions are used.",
+  "prompt_reward_rule": "correct_target_questions / 4",
   "templates": [
-    {
-      "type": "attribute",
-      "template": "Is the {object} {attribute}?",
-      "answer": "yes"
-    },
     {
       "type": "count",
       "template": "Are there exactly {count_word} {object_plural} in the image?",
       "answer": "yes"
     },
     {
-      "type": "relation",
-      "template": "Is/Are the {subject} {relation_phrase} the {object}?",
+      "type": "attribute",
+      "template": "Is the {counted_object} {attribute1}?",
       "answer": "yes"
     },
     {
-      "type": "anti_count_or_anti_relation",
-      "template": "Use only when needed as one of the four core constraints.",
-      "answer": "no"
+      "type": "attribute",
+      "template": "Is the {reference_object} {attribute2}?",
+      "answer": "yes"
+    },
+    {
+      "type": "relation",
+      "template": "Is the {counted_object} {relation_phrase} the {reference_object}?",
+      "answer": "yes"
     }
   ],
   "reward_rule": {
@@ -35,7 +36,8 @@
       "no",
       "uncertain"
     ],
-    "uncertain_score": 0.0
+    "uncertain_score": 0.0,
+    "note": "Use only target_questions for reward computation."
   },
-  "ucb_note": "Prompt rewards are normalized to [0, 1]. Bucket score is mean prompt reward. This is the only intentionally mixed-skill bucket."
+  "non_overlap_note": "Pure buckets remain target-isolated; this bucket intentionally combines skills."
 }
