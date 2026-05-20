@@ -36,10 +36,11 @@ python -m adaptive_curriculum.train.run_experiment \
     --config $PROJECT/adaptive_curriculum/configs/experiment.yaml \
     --experiment $PROJECT/adaptive_curriculum/configs/experiments/${EXPERIMENT}.yaml \
     --strategy ucb \
-    --repo-root   $LLAMAGEN \
-    --data-root   /viscam/u/jj277/adaptive-curriculum-t2i/data \
-    --gpt-ckpt    $PRETRAINED/t2i_XL_stage1_256.pt \
-    --vq-ckpt     $PRETRAINED/vq_ds16_t2i.pt \
-    --t5-path     $PRETRAINED/t5-ckpt \
-    --output-root /viscam/u/jj277/adaptive-curriculum-t2i/outputs \
+    --repo-root      $LLAMAGEN \
+    --data-root      /viscam/u/jj277/adaptive-curriculum-t2i/data \
+    --gpt-ckpt       $PRETRAINED/t2i_XL_stage1_256.pt \
+    --vq-ckpt        $PRETRAINED/vq_ds16_t2i.pt \
+    --t5-path        $PRETRAINED/t5-ckpt \
+    --t5-cache-dir   /viscam/u/jj277/adaptive-curriculum-t2i/data/t5_cache \
+    --output-root    /viscam/u/jj277/adaptive-curriculum-t2i/outputs \
     --wandb
