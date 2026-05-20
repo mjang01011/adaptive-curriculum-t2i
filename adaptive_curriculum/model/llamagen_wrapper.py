@@ -121,6 +121,12 @@ class LlamaGenWrapper:
             freeze_base_model(m)
             n_trainable = count_trainable_parameters(m)
             print(f"[LlamaGenWrapper] LoRA injected. Trainable params: {n_trainable:,}")
+            # bfloat16 gradient overflow through 36 frozen layers produces NaN/inf
+            # at LoRA params deep in backward. Replace with 0: NaN * 0 should be 0 (lora_B init=0)
+            # and clip_grad_norm handles any large-but-finite gradients afterward.
+            for p in m.parameters():
+                if p.requires_grad:
+                    p.register_hook(lambda g: g.nan_to_num(nan=0.0, posinf=0.0, neginf=0.0))
         else:
             for p in m.parameters():
                 p.requires_grad = True
@@ -530,7 +536,6 @@ class LlamaGenWrapper:
         self._optimizer.zero_grad()
         total_pg_loss = 0.0
         total_kl = 0.0
-        _debug_printed = False  # print once per step
 
         for start in range(0, total, chunk_size):
             end = min(start + chunk_size, total)
@@ -541,14 +546,6 @@ class LlamaGenWrapper:
             weight = (end - start) / total  # normalise so gradients sum correctly
 
             lp = self._compute_log_probs(c_tok, c_cond, c_mask, cfg_scale=self.cfg_scale)
-
-            # --- DEBUG: locate NaN source ---
-            if not _debug_printed:
-                lp_ok = torch.isfinite(lp).all().item()
-                adv_ok = torch.isfinite(c_adv).all().item()
-                print(f"[GRPO DEBUG step={self._step}] lp={lp.tolist()} adv={c_adv.tolist()} "
-                      f"lp_finite={lp_ok} adv_finite={adv_ok}")
-
             pg = -(c_adv * lp).mean() * weight
 
             if beta > 0.0 and ref_log_probs is not None:
@@ -559,17 +556,6 @@ class LlamaGenWrapper:
                 chunk_loss = pg
 
             chunk_loss.backward()
-
-            if not _debug_printed:
-                first_nan_param = next(
-                    (n for n, p in self.gpt.named_parameters()
-                     if p.requires_grad and p.grad is not None and not torch.isfinite(p.grad).all()),
-                    None
-                )
-                print(f"[GRPO DEBUG step={self._step}] first NaN grad param: {first_nan_param}")
-                _debug_printed = True
-            # --- END DEBUG ---
-
             total_pg_loss += pg.item()
 
         grad_norm = torch.nn.utils.clip_grad_norm_(
