@@ -1,0 +1,15 @@
+# Full UCB run: production settings once pilot confirms learning signal
+training:
+  num_curriculum_steps: 200
+  gradient_steps_per_curriculum_step: 16
+  train_batch_size: 4
+  learning_rate: 3.0e-5
+
+grpo:
+  num_samples: 8
+  beta: 0.01    # light KL penalty to prevent forgetting on high-scoring buckets
+
+evaluation:
+  full_eval_every_curriculum_step: 10
+  num_val_prompts_per_bucket: 16
+  num_samples_per_prompt: 2

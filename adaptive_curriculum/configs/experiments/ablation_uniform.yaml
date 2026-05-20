@@ -1,0 +1,15 @@
+# Ablation: uniform sampling baseline to compare against UCB
+# Run with --strategy uniform
+training:
+  num_curriculum_steps: 50
+  gradient_steps_per_curriculum_step: 8
+  train_batch_size: 4
+  learning_rate: 5.0e-5
+
+grpo:
+  num_samples: 4
+
+evaluation:
+  full_eval_every_curriculum_step: 5
+  num_val_prompts_per_bucket: 8
+  num_samples_per_prompt: 4

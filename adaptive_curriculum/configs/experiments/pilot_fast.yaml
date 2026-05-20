@@ -1,0 +1,17 @@
+# Fast pilot: verify UCB selection and reward signal in ~8 hours
+# Changes from base: fewer steps, smaller batches, faster eval
+training:
+  num_curriculum_steps: 50
+  gradient_steps_per_curriculum_step: 8
+  train_batch_size: 4
+  learning_rate: 5.0e-5
+
+grpo:
+  num_samples: 4
+
+evaluation:
+  full_eval_every_curriculum_step: 5
+  num_val_prompts_per_bucket: 8
+  num_samples_per_prompt: 4   # fewer prompts but each scored 4x — less noisy than 32x1
+
+training_save_every: 10

@@ -7,7 +7,8 @@ from pathlib import Path
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run adaptive curriculum experiment")
-    parser.add_argument("--config", type=str, required=True, help="Path to experiment.yaml")
+    parser.add_argument("--config", type=str, required=True, help="Path to base experiment.yaml")
+    parser.add_argument("--experiment", type=str, default=None, help="Path to experiment override yaml (merged on top of base config)")
     parser.add_argument("--strategy", type=str, choices=["uniform", "static", "ucb"], default="ucb")
     parser.add_argument("--output-root", type=str, default=None)
     parser.add_argument("--data-root", type=str, default=None)
@@ -32,6 +33,10 @@ def main():
 
     from omegaconf import OmegaConf
     config = OmegaConf.load(args.config)
+    if args.experiment:
+        overrides = OmegaConf.load(args.experiment)
+        config = OmegaConf.merge(config, overrides)
+        print(f"[run_experiment] Loaded experiment overrides from {args.experiment}")
 
     # CLI overrides
     if args.output_root:
