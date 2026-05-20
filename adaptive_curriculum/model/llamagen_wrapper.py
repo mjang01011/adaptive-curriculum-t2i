@@ -394,49 +394,64 @@ class LlamaGenWrapper:
         Returns: (B,) float tensor
         """
         import torch.nn.functional as F
-        # eval() matches the distribution used during generation (no conditioning/token/residual
-        # dropout). train() mode randomly replaces T5 conditioning with uncond_embedding and
-        # zeroes token positions, creating stochastic backward paths that produce NaN gradients.
-        # Gradients still flow through LoRA params — eval() only disables Dropout layers.
-        self.gpt.eval()
-        tokens_long = image_tokens.long()
-        B = tokens_long.shape[0]
-        # model is in float32 when this is called (cast by train_grpo_step)
-        c_cast = c_indices.float()
+        # Must stay in train() mode: LlamaGen uses self.training to select freqs_cis slicing
+        # (train → [:seq_len], eval → [input_pos]). eval() with input_pos=None gives wrong shape.
+        # Instead, disable only the stochastic ops that cause NaN gradients:
+        #  1. CaptionEmbedder conditioning dropout (class_dropout_prob=0.1): randomly replaces
+        #     T5 embeddings with uncond_embedding (a buffer with requires_grad=True), routing
+        #     gradients through an inconsistent path and producing NaN.
+        #  2. All nn.Dropout modules (token/residual/FFN dropout at p=0.1): stochastic scaling
+        #     creates position-specific gradient magnitudes that overflow in some layers.
+        # This matches the generation distribution (generated in no-dropout mode) and gives
+        # clean, deterministic gradients. Restored unconditionally via try/finally.
+        self.gpt.train()
+        saved_uncond_prob = self.gpt.cls_embedding.uncond_prob
+        self.gpt.cls_embedding.uncond_prob = 0.0
+        dropout_mods = [m for m in self.gpt.modules() if isinstance(m, nn.Dropout)]
+        for m in dropout_mods:
+            m.eval()
 
-        if cfg_scale > 1.0:
-            # Doubled batch: [conditional, unconditional]
-            c_uncond = torch.zeros_like(c_cast)
-            tokens_2x = tokens_long.repeat(2, 1)
-            c_2x = torch.cat([c_cast, c_uncond], dim=0)
-            logits_2x, _ = self.gpt(
-                idx=tokens_2x[:, :-1],
-                cond_idx=c_2x,
-                input_pos=None,
-                targets=None,
-                mask=None,
-                valid=None,
-            )
-            # sanitize before CFG combination — bfloat16 can produce NaN/inf in deep layers
-            logits_cond = logits_2x[:B].float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
-            logits_uncond = logits_2x[B:].float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
-            logits = logits_uncond + cfg_scale * (logits_cond - logits_uncond)
-        else:
-            logits, _ = self.gpt(
-                idx=tokens_long[:, :-1],
-                cond_idx=c_cast,
-                input_pos=None,
-                targets=None,
-                mask=None,
-                valid=None,
-            )
-            logits = logits.float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
+        try:
+            tokens_long = image_tokens.long()
+            B = tokens_long.shape[0]
+            # model is in float32 when this is called (cast by train_grpo_step)
+            c_cast = c_indices.float()
 
-        # log_softmax backward requires finite logits — sanitized above
-        log_p = F.log_softmax(logits, dim=-1)
-        token_lp = log_p.gather(-1, tokens_long.unsqueeze(-1)).squeeze(-1)  # (B, seq_len)
-        token_lp = token_lp.clamp(min=-20.0)
-        return token_lp.mean(dim=-1)  # (B,) mean over tokens
+            if cfg_scale > 1.0:
+                c_uncond = torch.zeros_like(c_cast)
+                tokens_2x = tokens_long.repeat(2, 1)
+                c_2x = torch.cat([c_cast, c_uncond], dim=0)
+                logits_2x, _ = self.gpt(
+                    idx=tokens_2x[:, :-1],
+                    cond_idx=c_2x,
+                    input_pos=None,
+                    targets=None,
+                    mask=None,
+                    valid=None,
+                )
+                logits_cond = logits_2x[:B].float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
+                logits_uncond = logits_2x[B:].float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
+                logits = logits_uncond + cfg_scale * (logits_cond - logits_uncond)
+            else:
+                logits, _ = self.gpt(
+                    idx=tokens_long[:, :-1],
+                    cond_idx=c_cast,
+                    input_pos=None,
+                    targets=None,
+                    mask=None,
+                    valid=None,
+                )
+                logits = logits.float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
+
+            log_p = F.log_softmax(logits, dim=-1)
+            token_lp = log_p.gather(-1, tokens_long.unsqueeze(-1)).squeeze(-1)  # (B, seq_len)
+            token_lp = token_lp.clamp(min=-20.0)
+            return token_lp.mean(dim=-1)  # (B,) mean over tokens
+
+        finally:
+            self.gpt.cls_embedding.uncond_prob = saved_uncond_prob
+            for m in dropout_mods:
+                m.train()
 
     def _compute_log_probs_ref(self, image_tokens, c_indices, c_emb_masks, cfg_scale: float = 1.0):
         """Log probs under reference model (LoRA zeroed = base model)."""
