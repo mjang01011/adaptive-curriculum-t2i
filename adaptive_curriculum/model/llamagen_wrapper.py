@@ -10,7 +10,7 @@ from typing import List, Optional, Dict
 
 import torch
 import torch.nn as nn
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 
 
 class LlamaGenWrapper:
@@ -71,7 +71,7 @@ class LlamaGenWrapper:
         self._gpt_model = None
         self._t5_model = None
         self._optimizer = None
-        self._scaler = GradScaler() if precision == "fp16" else None
+        self._scaler = GradScaler("cuda") if precision == "fp16" else None
         self._step = 0
 
         if repo_root not in sys.path:
@@ -319,7 +319,7 @@ class LlamaGenWrapper:
         use_amp = self.precision in ("bf16", "fp16")
         amp_dtype = self.dtype if use_amp else None
 
-        with autocast(dtype=amp_dtype, enabled=use_amp):
+        with autocast("cuda", dtype=amp_dtype, enabled=use_amp):
             logits, _ = self.gpt(
                 idx=targets[:, :-1],
                 cond_idx=c_indices,
@@ -396,38 +396,37 @@ class LlamaGenWrapper:
         self.gpt.train()
         tokens_long = image_tokens.long()
         B = tokens_long.shape[0]
-        c_fp32 = c_indices.float()
+        # match model dtype (bfloat16); logits converted to fp32 after forward
+        c_cast = c_indices.to(dtype=self.dtype)
 
         if cfg_scale > 1.0:
             # Doubled batch: [conditional, unconditional]
-            # unconditional uses zero conditioning (same convention as LlamaGen generate)
-            c_uncond = torch.zeros_like(c_fp32)
+            c_uncond = torch.zeros_like(c_cast)
             tokens_2x = tokens_long.repeat(2, 1)
-            c_2x = torch.cat([c_fp32, c_uncond], dim=0)
-            with autocast(dtype=torch.float32, enabled=False):
-                logits_2x, _ = self.gpt(
-                    idx=tokens_2x[:, :-1],
-                    cond_idx=c_2x,
-                    input_pos=None,
-                    targets=None,
-                    mask=None,
-                    valid=None,
-                )
+            c_2x = torch.cat([c_cast, c_uncond], dim=0)
+            logits_2x, _ = self.gpt(
+                idx=tokens_2x[:, :-1],
+                cond_idx=c_2x,
+                input_pos=None,
+                targets=None,
+                mask=None,
+                valid=None,
+            )
             logits_cond = logits_2x[:B].float()
             logits_uncond = logits_2x[B:].float()
             logits = logits_uncond + cfg_scale * (logits_cond - logits_uncond)
         else:
-            with autocast(dtype=torch.float32, enabled=False):
-                logits, _ = self.gpt(
-                    idx=tokens_long[:, :-1],
-                    cond_idx=c_fp32,
-                    input_pos=None,
-                    targets=None,
-                    mask=None,
-                    valid=None,
-                )
+            logits, _ = self.gpt(
+                idx=tokens_long[:, :-1],
+                cond_idx=c_cast,
+                input_pos=None,
+                targets=None,
+                mask=None,
+                valid=None,
+            )
             logits = logits.float()
 
+        # fp32 log_softmax for numerical stability
         log_p = F.log_softmax(logits, dim=-1)
         token_lp = log_p.gather(-1, tokens_long.unsqueeze(-1)).squeeze(-1)  # (B, seq_len)
         token_lp = token_lp.nan_to_num(nan=-20.0, neginf=-20.0)
