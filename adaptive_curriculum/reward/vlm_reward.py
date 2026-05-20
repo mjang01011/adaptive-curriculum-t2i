@@ -23,9 +23,9 @@ class Qwen3VLRewardModel(RewardModel):
         if self._model is not None:
             return
         import torch
-        from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+        from transformers import AutoProcessor, AutoModelForImageTextToText
         self._processor = AutoProcessor.from_pretrained(self.model_id)
-        self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        self._model = AutoModelForImageTextToText.from_pretrained(
             self.model_id,
             torch_dtype=torch.bfloat16,
             device_map=self.device,
