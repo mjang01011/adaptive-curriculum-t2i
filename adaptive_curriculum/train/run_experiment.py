@@ -13,6 +13,9 @@ def parse_args():
     parser.add_argument("--data-root", type=str, default=None)
     parser.add_argument("--pretrained-root", type=str, default=None)
     parser.add_argument("--repo-root", type=str, default=None, help="Path to LlamaGen repo root")
+    parser.add_argument("--gpt-ckpt", type=str, default=None, help="Path to GPT checkpoint .pt")
+    parser.add_argument("--vq-ckpt", type=str, default=None, help="Path to VQ tokenizer checkpoint .pt")
+    parser.add_argument("--t5-path", type=str, default=None, help="Path to T5 weights dir")
     parser.add_argument("--t5-cache-dir", type=str, default=None)
     parser.add_argument("--no-model", action="store_true", help="Dry run without LlamaGen (heuristic reward only)")
     parser.add_argument("--num-steps", type=int, default=None)
@@ -39,6 +42,12 @@ def main():
         config.paths.pretrained_root = args.pretrained_root
     if args.repo_root:
         config.paths.repo_root = args.repo_root
+    if args.gpt_ckpt:
+        config.model.gpt_ckpt = args.gpt_ckpt
+    if args.vq_ckpt:
+        config.model.vq_ckpt = args.vq_ckpt
+    if args.t5_path:
+        config.model.t5_path = args.t5_path
     if args.t5_cache_dir:
         config.paths.t5_cache_dir = args.t5_cache_dir
     if args.num_steps:
