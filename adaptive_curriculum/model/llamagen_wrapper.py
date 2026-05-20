@@ -393,19 +393,20 @@ class LlamaGenWrapper:
         import torch.nn.functional as F
         # must be in train mode so model trims logits to (B, seq_len, vocab_size)
         self.gpt.train()
+        tokens_long = image_tokens.long()
         use_amp = self.precision in ("bf16", "fp16")
         with autocast(dtype=self.dtype, enabled=use_amp):
             logits, _ = self.gpt(
-                idx=image_tokens[:, :-1],
+                idx=tokens_long[:, :-1],
                 cond_idx=c_indices,
                 input_pos=None,
-                targets=image_tokens,
+                targets=None,   # skip internal cross entropy — we compute our own
                 mask=None,
                 valid=None,
             )
         # in train mode: logits[:, cls_token_num-1:] → (B, seq_len, vocab_size)
         log_p = F.log_softmax(logits.float(), dim=-1)
-        token_lp = log_p.gather(-1, image_tokens.unsqueeze(-1)).squeeze(-1)  # (B, seq_len)
+        token_lp = log_p.gather(-1, tokens_long.unsqueeze(-1)).squeeze(-1)  # (B, seq_len)
         return token_lp.mean(dim=-1)  # (B,) mean over tokens
 
     def _compute_log_probs_ref(self, image_tokens, c_indices, c_emb_masks):
