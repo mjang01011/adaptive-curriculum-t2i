@@ -158,6 +158,7 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
     grad_steps_per = config.training.gradient_steps_per_curriculum_step
     train_batch_size = config.training.train_batch_size
     save_every = config.training.save_every
+    save_checkpoints = bool(getattr(config.training, "save_checkpoints", True))
     full_eval_every = config.evaluation.full_eval_every_curriculum_step
     num_samples = config.evaluation.num_samples_per_prompt
 
@@ -284,12 +285,12 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
             avg_reward = sum(r["mean_raw_reward"] for r in all_results.values()) / len(all_results)
             if avg_reward > best_avg_reward:
                 best_avg_reward = avg_reward
-                if model is not None:
+                if model is not None and save_checkpoints:
                     best_checkpoint = str(run_dir / "checkpoints" / f"best.pt")
                     model.save_checkpoint(best_checkpoint)
 
         # 7. Checkpoint
-        if step % save_every == 0:
+        if save_checkpoints and step % save_every == 0:
             if model is not None:
                 ckpt_path = str(run_dir / "checkpoints" / f"step_{step:06d}.pt")
                 model.save_checkpoint(ckpt_path)

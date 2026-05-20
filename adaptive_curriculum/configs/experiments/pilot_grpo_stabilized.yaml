@@ -9,6 +9,7 @@ training:
   train_batch_size: 2
   learning_rate: 1.0e-4
   max_grad_norm: 1.0
+  save_checkpoints: false
 
 grpo:
   num_samples: 6
