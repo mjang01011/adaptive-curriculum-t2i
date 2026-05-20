@@ -90,6 +90,10 @@ class UCBSampler(CurriculumSampler):
                 "n_selected": s.n_selected,
                 "raw_reward_ma": s.raw_reward_ma,
                 "improvement_ma": s.improvement_ma,
+                "exploration_bonus": (
+                    self.c * math.sqrt(math.log(self.t + 1) / s.n_selected)
+                    if s.n_selected > 0 else float("inf")
+                ),
                 "last_raw_reward": s.last_raw_reward,
                 "last_improvement": s.last_improvement,
                 "ucb_score": s.ucb_score,

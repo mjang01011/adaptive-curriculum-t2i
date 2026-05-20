@@ -42,8 +42,8 @@ buckets:
     - counting
     - spatial_relations
     - complex_composition
-  train_file: train.jsonl
-  val_file: val.jsonl
+  train_file: "{bucket}_train_80.jsonl"
+  val_file: "{bucket}_val_20.jsonl"
 
 training:
   strategy: ucb
@@ -59,7 +59,8 @@ evaluation:
   full_eval_every_curriculum_step: 10
   num_val_prompts_per_bucket: 32
   num_samples_per_prompt: 1
-  reward_model: heuristic
+  reward_model: qwen3vl                        # heuristic | vlm (claude) | qwen3vl
+  vlm_model: Qwen/Qwen3-VL-4B-Instruct
 
 ucb:
   c: 0.25
@@ -80,4 +81,7 @@ static_curriculum:
 
 logging:
   use_wandb: false
+  wandb_project: llamagen-adaptive-curriculum
+  wandb_entity: null        # your W&B username or team
+  run_name: null            # auto-generated from run dir if null
   log_jsonl: true

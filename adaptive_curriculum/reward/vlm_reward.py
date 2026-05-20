@@ -1,87 +1,106 @@
 """
-VLM-based compositional reward.
-Queries a vision-language model with yes/no questions about generated images.
+VLM-based compositional reward using local Qwen3-VL.
 """
-import base64
-import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from adaptive_curriculum.reward.reward_schema import RewardModel
 
 
-def _image_to_base64(image_path: str) -> str:
-    with open(image_path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
-
-
-class VLMRewardModel(RewardModel):
+class Qwen3VLRewardModel(RewardModel):
     """
-    Wraps an Anthropic Claude vision model for QA-based compositional scoring.
-    Requires ANTHROPIC_API_KEY in environment.
+    Runs Qwen3-VL-4B-Instruct locally. No API key needed.
+    Answers yes/no/uncertain per target_question, scores via reward_rule formula.
     """
 
-    def __init__(self, model: str = "claude-haiku-4-5-20251001", max_tokens: int = 32):
-        self.model = model
-        self.max_tokens = max_tokens
-        self._client = None
+    def __init__(self, model_id: str = "Qwen/Qwen3-VL-4B-Instruct", device: str = "auto"):
+        self.model_id = model_id
+        self.device = device
+        self._model = None
+        self._processor = None
 
-    def _get_client(self):
-        if self._client is None:
-            import anthropic
-            self._client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-        return self._client
-
-    def _ask_question(self, image_path: str, question: str, expected: str) -> dict:
-        client = self._get_client()
-        img_b64 = _image_to_base64(image_path)
-        ext = Path(image_path).suffix.lstrip(".").lower()
-        media_type = f"image/{ext}" if ext in ("png", "jpg", "jpeg", "webp") else "image/png"
-
-        prompt = (
-            f"{question}\n"
-            "Answer with only 'yes' or 'no'."
+    def _load(self):
+        if self._model is not None:
+            return
+        import torch
+        from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+        self._processor = AutoProcessor.from_pretrained(self.model_id)
+        self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            self.model_id,
+            torch_dtype=torch.bfloat16,
+            device_map=self.device,
         )
-        response = client.messages.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": img_b64}},
-                        {"type": "text", "text": prompt},
-                    ],
-                }
-            ],
+        self._model.eval()
+
+    def _ask(self, image_path: str, question: str) -> str:
+        """Returns 'yes', 'no', or 'uncertain'."""
+        import torch
+        from qwen_vl_utils import process_vision_info
+
+        self._load()
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": Path(image_path).as_uri()},
+                    {"type": "text", "text": f"{question}\nAnswer with only 'yes', 'no', or 'uncertain'."},
+                ],
+            }
+        ]
+        text = self._processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
         )
-        predicted = response.content[0].text.strip().lower()
-        predicted = "yes" if "yes" in predicted else "no"
-        correct = predicted == expected.lower()
-        return {"predicted": predicted, "correct": correct, "raw_response": response.content[0].text}
+        image_inputs, video_inputs = process_vision_info(messages)
+        inputs = self._processor(
+            text=[text],
+            images=image_inputs,
+            videos=video_inputs,
+            return_tensors="pt",
+            padding=True,
+        ).to(next(self._model.parameters()).device)
+
+        with torch.no_grad():
+            out_ids = self._model.generate(**inputs, max_new_tokens=8)
+        raw = self._processor.batch_decode(
+            out_ids[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True
+        )[0].strip().lower()
+
+        if "uncertain" in raw:
+            return "uncertain"
+        if "yes" in raw:
+            return "yes"
+        return "no"
 
     def score_image(self, image_path: str, item) -> dict:
+        reward_rule = getattr(item, "reward_rule", {}) or {}
+        uncertain_score = reward_rule.get("uncertain_score", 0.0)
+
         question_scores = []
-        total_weight = sum(q.weight for q in item.eval_questions)
-        weighted_sum = 0.0
+        correct_count = 0.0
 
         for q in item.eval_questions:
-            result = self._ask_question(image_path, q.question, q.answer)
-            weighted_sum += q.weight * float(result["correct"])
+            predicted = self._ask(image_path, q.question)
+            if predicted == "uncertain":
+                correct = False
+                q_score = uncertain_score
+            else:
+                correct = predicted == q.answer.lower()
+                q_score = 1.0 if correct else 0.0
+            correct_count += q_score
             question_scores.append({
                 "question": q.question,
                 "expected": q.answer,
-                "predicted": result["predicted"],
-                "correct": result["correct"],
-                "weight": q.weight,
-                "raw_response": result["raw_response"],
+                "predicted": predicted,
+                "correct": correct,
+                "q_type": q.q_type,
             })
 
-        score = weighted_sum / total_weight if total_weight > 0 else 0.0
+        n = len(item.eval_questions)
+        score = correct_count / n if n > 0 else 0.0
         return {
             "score": float(score),
             "question_scores": question_scores,
-            "raw_response": None,
         }
 
 
@@ -90,8 +109,8 @@ def build_reward_model(config) -> RewardModel:
     if reward_type == "heuristic":
         from adaptive_curriculum.reward.heuristic_reward import HeuristicRewardModel
         return HeuristicRewardModel()
-    elif reward_type == "vlm":
-        model_name = getattr(config.evaluation, "vlm_model", "claude-haiku-4-5-20251001")
-        return VLMRewardModel(model=model_name)
+    elif reward_type == "qwen3vl":
+        model_id = getattr(config.evaluation, "vlm_model", "Qwen/Qwen3-VL-4B-Instruct")
+        return Qwen3VLRewardModel(model_id=model_id)
     else:
         raise ValueError(f"Unknown reward_model: {reward_type}")

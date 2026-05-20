@@ -52,10 +52,15 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
     except Exception:
         pass
 
+    log_cfg = getattr(config, "logging", None)
     logger = RunLogger(
         run_dir=str(run_dir),
         strategy=strategy,
-        use_wandb=getattr(getattr(config, "logging", None), "use_wandb", False),
+        use_wandb=getattr(log_cfg, "use_wandb", False),
+        wandb_project=getattr(log_cfg, "wandb_project", None),
+        wandb_entity=getattr(log_cfg, "wandb_entity", None),
+        run_name=getattr(log_cfg, "run_name", None),
+        config=config,
     )
 
     bucket_names = list(config.buckets.names)
@@ -146,6 +151,8 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
     best_checkpoint = None
 
     for step in range(num_steps):
+        t_step_start = time.time()
+
         # 1. Choose bucket
         bucket = sampler.choose_bucket(step)
 
@@ -193,9 +200,14 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
         logger.log_curriculum_decision(step, bucket, ucb_scores, bucket_stats)
         logger.log_bucket_eval(step, bucket_summary)
 
+        step_time = time.time() - t_step_start
+        logger.log_step_time(step, step_time)
+        logger.log_gpu_stats(step)
+
         print(
             f"[step {step:4d}/{num_steps}] bucket={bucket:25s}  "
-            f"reward={bucket_summary['mean_raw_reward']:.4f}"
+            f"reward={bucket_summary['mean_raw_reward']:.4f}  "
+            f"t={step_time:.1f}s"
         )
 
         # 6. Periodic full evaluation
@@ -210,6 +222,7 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
                 seed=config.seed,
                 t5_cache=t5_cache,
             )
+            logger.log_full_eval(step, all_results)
             avg_reward = sum(r["mean_raw_reward"] for r in all_results.values()) / len(all_results)
             if avg_reward > best_avg_reward:
                 best_avg_reward = avg_reward

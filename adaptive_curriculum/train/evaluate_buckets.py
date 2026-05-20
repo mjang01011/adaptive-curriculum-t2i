@@ -66,11 +66,12 @@ def evaluate_bucket(
     rewards_records = []
     prompt_rewards = []
     per_question_correct: Dict[str, List[bool]] = {}
+    per_qtype_correct: Dict[str, List[bool]] = {}
+    sample_image_paths: List[str] = []  # up to 4 images for W&B logging
 
     for item_idx, item in enumerate(val_items):
         item_image_paths = []
         for k in range(n_samples):
-            # generate_images returns in order: sample k, all items
             path_idx = k * n_items + item_idx
             if path_idx < len(image_paths):
                 item_image_paths.append(image_paths[path_idx])
@@ -81,7 +82,10 @@ def evaluate_bucket(
             image_scores.append(result["score"])
             for q_result in result.get("question_scores", []):
                 q = q_result["question"]
-                per_question_correct.setdefault(q, []).append(q_result["correct"])
+                q_type = q_result.get("q_type", "unknown")
+                correct = q_result["correct"]
+                per_question_correct.setdefault(q, []).append(correct)
+                per_qtype_correct.setdefault(q_type, []).append(correct)
             rewards_records.append({
                 "item_id": item.id,
                 "bucket": item.bucket,
@@ -90,11 +94,12 @@ def evaluate_bucket(
                 "score": result["score"],
                 "question_scores": result.get("question_scores", []),
             })
+            if len(sample_image_paths) < 4:
+                sample_image_paths.append(img_path)
 
         prompt_reward = sum(image_scores) / len(image_scores) if image_scores else 0.0
         prompt_rewards.append(prompt_reward)
 
-    # save rewards.jsonl
     rewards_path = out_path / "rewards.jsonl"
     with open(rewards_path, "w", encoding="utf-8") as f:
         for r in rewards_records:
@@ -103,9 +108,8 @@ def evaluate_bucket(
     mean_reward = sum(prompt_rewards) / len(prompt_rewards) if prompt_rewards else 0.0
     std_reward = statistics.stdev(prompt_rewards) if len(prompt_rewards) > 1 else 0.0
 
-    per_q_accuracy = {
-        q: sum(vals) / len(vals) for q, vals in per_question_correct.items()
-    }
+    per_q_accuracy = {q: sum(v) / len(v) for q, v in per_question_correct.items()}
+    per_qtype_accuracy = {qt: sum(v) / len(v) for qt, v in per_qtype_correct.items()}
 
     summary = {
         "bucket": bucket_name,
@@ -114,6 +118,9 @@ def evaluate_bucket(
         "num_prompts": len(val_items),
         "num_images": len(rewards_records),
         "per_question_accuracy": per_q_accuracy,
+        "per_qtype_accuracy": per_qtype_accuracy,
+        "sample_image_paths": sample_image_paths,
+        "reward_distribution": prompt_rewards,
     }
     write_json(str(out_path / "summary.json"), summary)
     return summary

@@ -39,15 +39,15 @@ def _load_jsonl(path: Path) -> List[BucketItem]:
 def load_bucket_datasets(
     data_root: str,
     bucket_names: List[str],
-    train_file: str = "train.jsonl",
-    val_file: str = "val.jsonl",
+    train_file: str = "{bucket}_train_80.jsonl",
+    val_file: str = "{bucket}_val_20.jsonl",
     max_val_prompts: Optional[int] = None,
 ) -> Dict[str, BucketDataset]:
-    root = Path(data_root) / "buckets"
+    root = Path(data_root)
     datasets: Dict[str, BucketDataset] = {}
     for name in bucket_names:
-        train_path = root / name / train_file
-        val_path = root / name / val_file
+        train_path = root / name / train_file.format(bucket=name)
+        val_path = root / name / val_file.format(bucket=name)
         train_items = _load_jsonl(train_path)
         val_items = _load_jsonl(val_path)
         if max_val_prompts is not None:

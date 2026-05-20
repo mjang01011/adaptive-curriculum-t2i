@@ -5,79 +5,57 @@ from typing import List, Optional, Dict, Any
 @dataclass
 class EvalQuestion:
     question: str
-    answer: str
+    answer: str          # "yes" | "no"
+    q_type: str = ""     # "attribute", "anti_swap", "count", "relation", etc.
     weight: float = 1.0
-
-
-@dataclass
-class StructuredPrompt:
-    objects: List[str] = field(default_factory=list)
-    attributes: Dict[str, str] = field(default_factory=dict)
-    relations: List[Dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
 class BucketItem:
     id: str
     bucket: str
+    prompt: str
     eval_questions: List[EvalQuestion]
-    # At least one of these must be present
-    prompt: Optional[str] = None          # text-only validation item
-    caption: Optional[str] = None        # caption when image_path is available
-    image_path: Optional[str] = None     # path to training image (may be absent)
-    structured_prompt: Optional[StructuredPrompt] = None
+    reward_rule: Dict[str, Any] = field(default_factory=dict)
+    image_path: Optional[str] = None
 
     @property
     def text(self) -> str:
-        return self.caption or self.prompt or ""
+        return self.prompt
 
     @classmethod
     def from_dict(cls, d: dict) -> "BucketItem":
+        # support both "target_questions" (actual JSONL) and "eval_questions" (legacy)
+        raw_qs = d.get("target_questions") or d.get("eval_questions") or []
         questions = [
             EvalQuestion(
                 question=q["question"],
                 answer=q["answer"],
+                q_type=q.get("type", ""),
                 weight=q.get("weight", 1.0),
             )
-            for q in d.get("eval_questions", [])
+            for q in raw_qs
         ]
-        sp = None
-        if "structured_prompt" in d and d["structured_prompt"]:
-            raw = d["structured_prompt"]
-            sp = StructuredPrompt(
-                objects=raw.get("objects", []),
-                attributes=raw.get("attributes", {}),
-                relations=raw.get("relations", []),
-            )
         return cls(
             id=d["id"],
             bucket=d["bucket"],
+            prompt=d.get("prompt") or d.get("caption") or "",
             eval_questions=questions,
-            prompt=d.get("prompt"),
-            caption=d.get("caption"),
+            reward_rule=d.get("reward_rule", {}),
             image_path=d.get("image_path"),
-            structured_prompt=sp,
         )
 
     def to_dict(self) -> dict:
         d: Dict[str, Any] = {
             "id": self.id,
             "bucket": self.bucket,
-            "eval_questions": [
-                {"question": q.question, "answer": q.answer, "weight": q.weight}
+            "prompt": self.prompt,
+            "target_questions": [
+                {"type": q.q_type, "question": q.question, "answer": q.answer}
                 for q in self.eval_questions
             ],
+            "reward_rule": self.reward_rule,
         }
-        if self.prompt is not None:
-            d["prompt"] = self.prompt
-        if self.caption is not None:
-            d["caption"] = self.caption
         if self.image_path is not None:
             d["image_path"] = self.image_path
-        if self.structured_prompt is not None:
-            d["structured_prompt"] = {
-                "objects": self.structured_prompt.objects,
-                "attributes": self.structured_prompt.attributes,
-                "relations": self.structured_prompt.relations,
-            }
         return d
