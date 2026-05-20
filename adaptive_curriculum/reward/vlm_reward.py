@@ -32,18 +32,24 @@ class Qwen3VLRewardModel(RewardModel):
         )
         self._model.eval()
 
-    def _ask(self, image_path: str, question: str) -> str:
-        """Returns 'yes', 'no', or 'uncertain'."""
+    def _ask(self, image, question: str) -> str:
+        """Returns 'yes', 'no', or 'uncertain'. image: path str or PIL.Image."""
         import torch
         from qwen_vl_utils import process_vision_info
 
         self._load()
 
+        # accept both file path and in-memory PIL image
+        if isinstance(image, str):
+            image_content = {"type": "image", "image": Path(image).as_uri()}
+        else:
+            image_content = {"type": "image", "image": image}
+
         messages = [
             {
                 "role": "user",
                 "content": [
-                    {"type": "image", "image": Path(image_path).as_uri()},
+                    image_content,
                     {"type": "text", "text": f"{question}\nAnswer with only 'yes', 'no', or 'uncertain'."},
                 ],
             }

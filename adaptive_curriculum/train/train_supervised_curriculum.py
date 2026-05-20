@@ -156,20 +156,33 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
         # 1. Choose bucket
         bucket = sampler.choose_bucket(step)
 
-        # 2. Train K gradient steps
+        # 2. Train K GRPO steps
+        grpo_cfg = getattr(config, "grpo", None)
+        grpo_num_samples = getattr(grpo_cfg, "num_samples", 4) if grpo_cfg else 4
+        grpo_beta = getattr(grpo_cfg, "beta", 0.01) if grpo_cfg else 0.01
+
         train_metrics_list = []
         if model is not None:
-            model.gpt.train()
             for _ in range(grad_steps_per):
                 batch = datasets[bucket].sample_train_batch(train_batch_size)
                 if batch:
-                    metrics = model.train_supervised_step(batch)
+                    metrics = model.train_grpo_step(
+                        batch=batch,
+                        reward_model=reward_model,
+                        num_samples=grpo_num_samples,
+                        beta=grpo_beta,
+                        t5_cache=t5_cache,
+                    )
                     train_metrics_list.append(metrics)
 
         if train_metrics_list:
             avg_loss = sum(m["loss"] for m in train_metrics_list) / len(train_metrics_list)
             logger.log_train_metrics(step, bucket, {
                 "avg_loss": avg_loss,
+                "pg_loss": sum(m["pg_loss"] for m in train_metrics_list) / len(train_metrics_list),
+                "kl_loss": sum(m["kl_loss"] for m in train_metrics_list) / len(train_metrics_list),
+                "train_mean_reward": sum(m["mean_reward"] for m in train_metrics_list) / len(train_metrics_list),
+                "train_reward_std": sum(m["reward_std"] for m in train_metrics_list) / len(train_metrics_list),
                 "lr": train_metrics_list[-1].get("lr", 0),
                 "grad_norm": train_metrics_list[-1].get("grad_norm", 0),
             })

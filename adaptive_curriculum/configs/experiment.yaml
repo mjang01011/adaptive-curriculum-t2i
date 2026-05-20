@@ -48,11 +48,15 @@ buckets:
 training:
   strategy: ucb
   num_curriculum_steps: 200
-  gradient_steps_per_curriculum_step: 10
+  gradient_steps_per_curriculum_step: 32
   train_batch_size: 8
   learning_rate: 1.0e-5
   max_grad_norm: 1.0
   save_every: 20
+
+grpo:
+  num_samples: 8     # images generated per prompt per GRPO step (G)
+  beta: 0.01         # KL penalty weight vs reference (base model); set 0 to disable
 
 evaluation:
   eval_every_curriculum_step: 1
@@ -60,7 +64,7 @@ evaluation:
   num_val_prompts_per_bucket: 32
   num_samples_per_prompt: 1
   reward_model: qwen3vl                        # heuristic | vlm (claude) | qwen3vl
-  vlm_model: Qwen/Qwen3-VL-4B-Instruct
+  vlm_model: Qwen/Qwen3-VL-2B-Instruct
 
 ucb:
   c: 0.25

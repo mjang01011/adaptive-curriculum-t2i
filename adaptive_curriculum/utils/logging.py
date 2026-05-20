@@ -51,6 +51,10 @@ class RunLogger:
             self._wandb_run.log(
                 {
                     "train/loss": metrics.get("avg_loss", 0),
+                    "train/pg_loss": metrics.get("pg_loss", 0),
+                    "train/kl_loss": metrics.get("kl_loss", 0),
+                    "train/mean_reward": metrics.get("train_mean_reward", 0),
+                    "train/reward_std": metrics.get("train_reward_std", 0),
                     "train/lr": metrics.get("lr", 0),
                     "train/grad_norm": metrics.get("grad_norm", 0),
                 },
