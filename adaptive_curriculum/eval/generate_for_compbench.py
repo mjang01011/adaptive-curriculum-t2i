@@ -117,11 +117,11 @@ def _load_compbench_txt(path: Path) -> List[dict]:
     return items
 
 
-# Main category files in T2I-CompBench++ examples/dataset/ (no _train/_val suffix)
+# Test split files only (_val.txt = 30% held-out test set, ~300 prompts each)
 COMPBENCH_MAIN_FILES = [
-    "color.txt", "shape.txt", "texture.txt",
-    "spatial.txt", "3d_spatial.txt",
-    "non_spatial.txt", "complex.txt", "numeracy.txt",
+    "color_val.txt", "shape_val.txt", "texture_val.txt",
+    "spatial_val.txt", "3d_spatial_val.txt",
+    "non_spatial_val.txt", "complex_val.txt", "numeracy_val.txt",
 ]
 
 
