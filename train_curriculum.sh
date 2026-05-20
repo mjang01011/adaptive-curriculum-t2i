@@ -17,7 +17,8 @@ export HF_HOME=/viscam/u/jj277/.hf_cache
 export WANDB_DIR=/viscam/u/jj277/.wandb
 export TOKENIZERS_PARALLELISM=false
 # Set WANDB_API_KEY in your environment or ~/.bashrc on viscam — do NOT hardcode here
-# export WANDB_API_KEY=...
+export WANDB_API_KEY=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
+
 
 source /viscam/u/jj277/svl/bin/activate
 
