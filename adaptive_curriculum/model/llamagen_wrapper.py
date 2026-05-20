@@ -394,7 +394,11 @@ class LlamaGenWrapper:
         Returns: (B,) float tensor
         """
         import torch.nn.functional as F
-        self.gpt.train()
+        # eval() matches the distribution used during generation (no conditioning/token/residual
+        # dropout). train() mode randomly replaces T5 conditioning with uncond_embedding and
+        # zeroes token positions, creating stochastic backward paths that produce NaN gradients.
+        # Gradients still flow through LoRA params — eval() only disables Dropout layers.
+        self.gpt.eval()
         tokens_long = image_tokens.long()
         B = tokens_long.shape[0]
         # model is in float32 when this is called (cast by train_grpo_step)
