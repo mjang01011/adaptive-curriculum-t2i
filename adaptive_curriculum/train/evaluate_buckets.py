@@ -18,6 +18,7 @@ def evaluate_bucket(
     num_samples_per_prompt: int = 1,
     seed: Optional[int] = None,
     t5_cache=None,
+    reward_mode: str = "hard_target",
 ) -> dict:
     """
     Generate images for validation items, score them, return bucket-level summary.
@@ -78,7 +79,7 @@ def evaluate_bucket(
 
         image_scores = []
         for img_path in item_image_paths:
-            result = reward_model.score_image(img_path, item)
+            result = reward_model.score_image(img_path, item, mode=reward_mode)
             image_scores.append(result["score"])
             for q_result in result.get("question_scores", []):
                 q = q_result["question"]
@@ -135,6 +136,7 @@ def evaluate_all_buckets(
     num_samples_per_prompt: int = 1,
     seed: Optional[int] = None,
     t5_cache=None,
+    reward_mode: str = "hard_target",
 ) -> Dict[str, dict]:
     results = {}
     for bucket_name, dataset in datasets.items():
@@ -147,6 +149,7 @@ def evaluate_all_buckets(
             num_samples_per_prompt=num_samples_per_prompt,
             seed=seed,
             t5_cache=t5_cache,
+            reward_mode=reward_mode,
         )
         results[bucket_name] = summary
     return results

@@ -28,7 +28,8 @@ class LlamaGenWrapper:
         t5_path: str = "pretrained_models/t5-ckpt",
         t5_model_type: str = "flan-t5-xl",
         t5_feature_max_len: int = 120,
-        cfg_scale: float = 7.5,
+        cfg_scale: float = 2.0,
+        cfg_scale_train: Optional[float] = None,
         temperature: float = 1.0,
         top_k: int = 1000,
         top_p: float = 1.0,
@@ -38,6 +39,7 @@ class LlamaGenWrapper:
         lora_config: Optional[dict] = None,
         learning_rate: float = 1e-5,
         max_grad_norm: float = 1.0,
+        logprob_reduction: str = "sum_sqrt_len",
     ):
         self.repo_root = repo_root
         self.vq_ckpt = vq_ckpt
@@ -52,6 +54,8 @@ class LlamaGenWrapper:
         self.t5_model_type = t5_model_type
         self.t5_feature_max_len = t5_feature_max_len
         self.cfg_scale = cfg_scale
+        self.cfg_scale_train = cfg_scale_train if cfg_scale_train is not None else cfg_scale
+        self.logprob_reduction = logprob_reduction
         self.temperature = temperature
         self.top_k = top_k
         self.top_p = top_p
@@ -385,12 +389,11 @@ class LlamaGenWrapper:
         for block in self.gpt.layers:
             block.attention.kv_cache = None
 
-    def _compute_log_probs(self, image_tokens, c_indices, c_emb_masks, cfg_scale: float = 1.0):
+    def _compute_log_probs(self, image_tokens, c_indices, c_emb_masks, cfg_scale: float = 1.0, reduction: Optional[str] = None):
         """
-        Full forward pass → mean per-token log prob for each sequence.
+        Full forward pass → sequence log prob for each sequence.
         image_tokens: (B, seq_len) int64
-        When cfg_scale > 1.0, uses CFG logit combination (cond + uncond doubled batch)
-        so log probs are consistent with CFG-guided generation.
+        reduction: "mean" | "sum" | "sum_sqrt_len" (default: self.logprob_reduction)
         Returns: (B,) float tensor
         """
         import torch.nn.functional as F
@@ -446,7 +449,15 @@ class LlamaGenWrapper:
             log_p = F.log_softmax(logits, dim=-1)
             token_lp = log_p.gather(-1, tokens_long.unsqueeze(-1)).squeeze(-1)  # (B, seq_len)
             token_lp = token_lp.clamp(min=-20.0)
-            return token_lp.mean(dim=-1)  # (B,) mean over tokens
+
+            red = reduction if reduction is not None else self.logprob_reduction
+            import math as _math
+            if red == "sum":
+                return token_lp.sum(dim=-1)
+            elif red == "sum_sqrt_len":
+                return token_lp.sum(dim=-1) / _math.sqrt(token_lp.shape[-1])
+            else:  # mean
+                return token_lp.mean(dim=-1)
 
         finally:
             self.gpt.cls_embedding.uncond_prob = saved_uncond_prob
@@ -474,6 +485,8 @@ class LlamaGenWrapper:
         num_samples: int = 4,
         beta: float = 0.01,
         t5_cache=None,
+        reward_mode: str = "hard_target",
+        advantage_eps: float = 1e-8,
     ) -> dict:
         """
         GRPO: generate num_samples images per prompt in memory (no disk I/O),
@@ -500,7 +513,7 @@ class LlamaGenWrapper:
                 index_sample = generate(
                     self.gpt, c_indices, self.latent_size ** 2,
                     c_emb_masks,
-                    cfg_scale=self.cfg_scale,
+                    cfg_scale=self.cfg_scale_train,
                     temperature=self.temperature,
                     top_k=self.top_k,
                     top_p=self.top_p,
@@ -523,12 +536,12 @@ class LlamaGenWrapper:
         for s in range(num_samples):
             for i, item in enumerate(batch):
                 pil_img = all_pil_imgs[s * B + i]
-                score = reward_model.score_image(pil_img, item)["score"]
+                score = reward_model.score_image(pil_img, item, mode=reward_mode)["score"]
                 rewards[i, s] = score
 
         # 4. Group-relative advantages per prompt
         mean_r = rewards.mean(dim=1, keepdim=True)   # (B, 1)
-        std_r = rewards.std(dim=1, keepdim=True) + 1e-8
+        std_r = rewards.std(dim=1, keepdim=True) + advantage_eps
         advantages = ((rewards - mean_r) / std_r).nan_to_num(nan=0.0)  # (B, num_samples)
 
         # 5. Stack tokens: (B * num_samples, seq_len)
@@ -559,6 +572,7 @@ class LlamaGenWrapper:
         self._optimizer.zero_grad()
         total_pg_loss = 0.0
         total_kl = 0.0
+        all_seq_lp: list = []
 
         for start in range(0, total, chunk_size):
             end = min(start + chunk_size, total)
@@ -569,6 +583,7 @@ class LlamaGenWrapper:
             weight = (end - start) / total  # normalise so gradients sum correctly
 
             lp = self._compute_log_probs(c_tok, c_cond, c_mask, cfg_scale=_lp_cfg_scale)
+            all_seq_lp.extend(lp.detach().cpu().tolist())
             pg = -(c_adv * lp).mean() * weight
 
             if beta > 0.0 and ref_log_probs is not None:
@@ -586,15 +601,35 @@ class LlamaGenWrapper:
                 if p.requires_grad and p.grad is not None:
                     p.grad.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
 
-        grad_norm = torch.nn.utils.clip_grad_norm_(
+        # LoRA grad norm (post-NaN-sanitize, pre-clip — these are what actually get applied)
+        lora_params = [p for n, p in self.gpt.named_parameters()
+                       if ("lora_A" in n or "lora_B" in n) and p.requires_grad]
+        lora_grad_norm = (
+            sum(p.grad.float().norm().item() ** 2 for p in lora_params if p.grad is not None) ** 0.5
+            if lora_params else 0.0
+        )
+
+        grad_norm_before_clip = torch.nn.utils.clip_grad_norm_(
             [p for p in self.gpt.parameters() if p.requires_grad],
             self.max_grad_norm,
         ).item()
 
         self._optimizer.step()
 
+        # LoRA weight norm (post-step)
+        lora_weight_norm = (
+            sum(p.data.float().norm().item() ** 2 for p in lora_params) ** 0.5
+            if lora_params else 0.0
+        )
+
         # Cast back to bfloat16 for generation
         self.gpt.to(dtype=self.dtype)
+
+        # --- diagnostics ---
+        reward_stds = rewards.std(dim=1).cpu()                       # (B,)
+        flat_adv = advantages.abs().reshape(-1).cpu()
+        import statistics as _stats
+        seq_lp_t = torch.tensor(all_seq_lp)
 
         self._step += 1
         return {
@@ -603,8 +638,24 @@ class LlamaGenWrapper:
             "kl_loss": total_kl,
             "mean_reward": rewards.mean().item(),
             "reward_std": rewards.std().item(),
+            "reward_min": rewards.min().item(),
+            "reward_max": rewards.max().item(),
             "lr": self._optimizer.param_groups[0]["lr"],
-            "grad_norm": grad_norm,
+            "grad_norm": grad_norm_before_clip,
+            "grad_norm_before_clip": grad_norm_before_clip,
+            "grad_norm_after_clip": min(grad_norm_before_clip, self.max_grad_norm),
+            "lora_weight_norm": lora_weight_norm,
+            "lora_grad_norm": lora_grad_norm,
+            "percent_groups_zero_std": float((reward_stds < 1e-6).float().mean().item() * 100),
+            "mean_group_reward_std": float(reward_stds.mean().item()),
+            "median_group_reward_std": float(_stats.median(reward_stds.tolist())),
+            "mean_abs_advantage": float(flat_adv.mean().item()),
+            "fraction_nonzero_advantage": float((flat_adv > 1e-6).float().mean().item()),
+            "seq_logprob_mean": float(seq_lp_t.mean().item()),
+            "seq_logprob_std": float(seq_lp_t.std().item()) if len(seq_lp_t) > 1 else 0.0,
+            "cfg_scale_train": self.cfg_scale_train,
+            "logprob_reduction": self.logprob_reduction,
+            "reward_mode": reward_mode,
         }
 
     def save_checkpoint(self, path: str):

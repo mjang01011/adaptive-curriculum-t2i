@@ -32,6 +32,7 @@ def build_sampler(strategy: str, bucket_names: list, config):
             c=config.ucb.c,
             reward_ma_beta=config.ucb.reward_ma_beta,
             improvement_ma_beta=config.ucb.improvement_ma_beta,
+            epsilon=float(getattr(config.ucb, "epsilon", 0.0)),
         )
     else:
         raise ValueError(f"Unknown strategy: {strategy}")
@@ -103,6 +104,15 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
             "target_modules": list(config.lora.get("target_modules", ["wqkv", "wo"])),
             "start_layer": int(getattr(config.lora, "start_layer", 0)),
         } if config.model.use_lora else None
+        grpo_cfg_train = getattr(config, "grpo", None)
+        _cfg_scale_train = (
+            float(getattr(grpo_cfg_train, "cfg_scale_train", getattr(config.model, "cfg_scale", 2.0)))
+            if grpo_cfg_train else float(getattr(config.model, "cfg_scale", 2.0))
+        )
+        _logprob_reduction = (
+            str(getattr(grpo_cfg_train, "logprob_reduction", "sum_sqrt_len"))
+            if grpo_cfg_train else "sum_sqrt_len"
+        )
         model = LlamaGenWrapper(
             repo_root=config.paths.repo_root,
             vq_ckpt=config.model.vq_ckpt,
@@ -112,6 +122,9 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
             t5_path=config.model.t5_path,
             t5_model_type=config.model.t5_model_type,
             t5_feature_max_len=config.model.t5_feature_max_len,
+            cfg_scale=float(getattr(config.model, "cfg_scale", 2.0)),
+            cfg_scale_train=_cfg_scale_train,
+            logprob_reduction=_logprob_reduction,
             precision=config.model.mixed_precision,
             use_lora=config.model.use_lora,
             lora_config=lora_cfg,
@@ -123,6 +136,7 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
     sampler = build_sampler(strategy, bucket_names, config)
 
     # initial evaluation
+    eval_reward_mode = str(getattr(getattr(config, "evaluation", None), "reward_mode", "hard_target"))
     print("[train] Running initial bucket evaluation...")
     evals_dir = str(run_dir / "evals")
     initial_results = evaluate_all_buckets(
@@ -134,6 +148,7 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
         num_samples_per_prompt=config.evaluation.num_samples_per_prompt,
         seed=config.seed,
         t5_cache=t5_cache,
+        reward_mode=eval_reward_mode,
     )
     initial_scores = {b: r["mean_raw_reward"] for b, r in initial_results.items()}
     sampler.initialize_rewards(initial_scores)
@@ -161,6 +176,8 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
         grpo_cfg = getattr(config, "grpo", None)
         grpo_num_samples = getattr(grpo_cfg, "num_samples", 4) if grpo_cfg else 4
         grpo_beta = getattr(grpo_cfg, "beta", 0.01) if grpo_cfg else 0.01
+        grpo_reward_mode = str(getattr(grpo_cfg, "reward_mode", "hard_target")) if grpo_cfg else "hard_target"
+        grpo_advantage_eps = float(getattr(grpo_cfg, "advantage_eps", 1e-8)) if grpo_cfg else 1e-8
 
         train_metrics_list = []
         if model is not None:
@@ -173,25 +190,47 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
                         num_samples=grpo_num_samples,
                         beta=grpo_beta,
                         t5_cache=t5_cache,
+                        reward_mode=grpo_reward_mode,
+                        advantage_eps=grpo_advantage_eps,
                     )
                     train_metrics_list.append(metrics)
                     if (g + 1) % 4 == 0:
                         print(f"  [grpo {g+1}/{grad_steps_per}] loss={metrics['loss']:.4f}  "
-                              f"reward={metrics['mean_reward']:.3f}  grad_norm={metrics['grad_norm']:.3f}")
+                              f"reward={metrics['mean_reward']:.3f}  grad_norm={metrics['grad_norm']:.3f}  "
+                              f"zero_std={metrics.get('percent_groups_zero_std', 0):.0f}%  "
+                              f"mean_adv={metrics.get('mean_abs_advantage', 0):.3f}")
 
         if train_metrics_list:
-            avg_loss = sum(m["loss"] for m in train_metrics_list) / len(train_metrics_list)
+            n = len(train_metrics_list)
+            def _avg(key, default=0.0):
+                return sum(m.get(key, default) for m in train_metrics_list) / n
             logger.log_train_metrics(step, bucket, {
-                "avg_loss": avg_loss,
-                "pg_loss": sum(m["pg_loss"] for m in train_metrics_list) / len(train_metrics_list),
-                "kl_loss": sum(m["kl_loss"] for m in train_metrics_list) / len(train_metrics_list),
-                "train_mean_reward": sum(m["mean_reward"] for m in train_metrics_list) / len(train_metrics_list),
-                "train_reward_std": sum(m["reward_std"] for m in train_metrics_list) / len(train_metrics_list),
+                "avg_loss": _avg("loss"),
+                "pg_loss": _avg("pg_loss"),
+                "kl_loss": _avg("kl_loss"),
+                "train_mean_reward": _avg("mean_reward"),
+                "train_reward_std": _avg("reward_std"),
+                "reward_min": _avg("reward_min"),
+                "reward_max": _avg("reward_max"),
                 "lr": train_metrics_list[-1].get("lr", 0),
-                "grad_norm": train_metrics_list[-1].get("grad_norm", 0),
+                "grad_norm": _avg("grad_norm"),
+                "grad_norm_before_clip": _avg("grad_norm_before_clip"),
+                "grad_norm_after_clip": _avg("grad_norm_after_clip"),
+                "lora_weight_norm": train_metrics_list[-1].get("lora_weight_norm", 0),
+                "lora_grad_norm": _avg("lora_grad_norm"),
+                "percent_groups_zero_std": _avg("percent_groups_zero_std"),
+                "mean_group_reward_std": _avg("mean_group_reward_std"),
+                "median_group_reward_std": _avg("median_group_reward_std"),
+                "mean_abs_advantage": _avg("mean_abs_advantage"),
+                "fraction_nonzero_advantage": _avg("fraction_nonzero_advantage"),
+                "seq_logprob_mean": _avg("seq_logprob_mean"),
+                "seq_logprob_std": _avg("seq_logprob_std"),
+                "cfg_scale_train": train_metrics_list[-1].get("cfg_scale_train", 2.0),
+                "logprob_reduction": train_metrics_list[-1].get("logprob_reduction", "sum_sqrt_len"),
+                "reward_mode": train_metrics_list[-1].get("reward_mode", grpo_reward_mode),
             })
 
-        # 3. Evaluate selected bucket
+        # 3. Evaluate selected bucket (always hard_target for clean UCB signal)
         bucket_eval_dir = str(run_dir / "evals" / f"step_{step:06d}" / bucket)
         bucket_summary = evaluate_bucket(
             model=model,
@@ -201,6 +240,7 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
             num_samples_per_prompt=num_samples,
             seed=config.seed,
             t5_cache=t5_cache,
+            reward_mode=eval_reward_mode,
         )
         total_generated += bucket_summary["num_images"]
 
@@ -238,6 +278,7 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
                 num_samples_per_prompt=num_samples,
                 seed=config.seed,
                 t5_cache=t5_cache,
+                reward_mode=eval_reward_mode,
             )
             logger.log_full_eval(step, all_results)
             avg_reward = sum(r["mean_raw_reward"] for r in all_results.values()) / len(all_results)
@@ -266,6 +307,7 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
         num_samples_per_prompt=num_samples,
         seed=config.seed,
         t5_cache=t5_cache,
+        reward_mode=eval_reward_mode,
     )
     final_bucket_rewards = {b: r["mean_raw_reward"] for b, r in final_results.items()}
     avg_final = sum(final_bucket_rewards.values()) / len(final_bucket_rewards)

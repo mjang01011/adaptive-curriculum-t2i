@@ -31,11 +31,13 @@ class UCBSampler(CurriculumSampler):
         c: float = 0.25,
         reward_ma_beta: float = 0.8,
         improvement_ma_beta: float = 0.8,
+        epsilon: float = 0.0,
     ):
         self.bucket_names = bucket_names
         self.c = c
         self.reward_ma_beta = reward_ma_beta
         self.improvement_ma_beta = improvement_ma_beta
+        self.epsilon = epsilon
         self.t = 0
         self.buckets: Dict[str, BucketStats] = {
             name: BucketStats(name=name) for name in bucket_names
@@ -50,14 +52,22 @@ class UCBSampler(CurriculumSampler):
                 self.buckets[name].last_raw_reward = score
 
     def choose_bucket(self, step: int) -> str:
+        import random
         scores = {
             name: compute_ucb_score(stats, self.t, self.c)
             for name, stats in self.buckets.items()
         }
-        chosen = max(scores, key=lambda k: scores[k])
         # store ucb scores on stats for logging
         for name, score in scores.items():
             self.buckets[name].ucb_score = score
+
+        # epsilon-greedy: random explore only after all buckets have been selected at least once
+        all_seen = all(s.n_selected > 0 for s in self.buckets.values())
+        if all_seen and self.epsilon > 0.0 and random.random() < self.epsilon:
+            chosen = random.choice(self.bucket_names)
+        else:
+            chosen = max(scores, key=lambda k: scores[k])
+
         self._last_chosen = chosen
         return chosen
 
@@ -105,6 +115,7 @@ class UCBSampler(CurriculumSampler):
         return {
             "t": self.t,
             "c": self.c,
+            "epsilon": self.epsilon,
             "reward_ma_beta": self.reward_ma_beta,
             "improvement_ma_beta": self.improvement_ma_beta,
             "buckets": {
@@ -124,6 +135,7 @@ class UCBSampler(CurriculumSampler):
     def load_state_dict(self, state: dict):
         self.t = state["t"]
         self.c = state["c"]
+        self.epsilon = state.get("epsilon", self.epsilon)
         self.reward_ma_beta = state["reward_ma_beta"]
         self.improvement_ma_beta = state["improvement_ma_beta"]
         for name, sd in state["buckets"].items():

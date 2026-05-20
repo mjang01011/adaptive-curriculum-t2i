@@ -1,16 +1,128 @@
 """
 VLM-based compositional reward using local Qwen3-VL.
+
+Key design: one VLM call per image answers ALL target questions at once,
+reducing inference cost by 2-4× vs one call per question.
+
+Reward modes
+------------
+hard_target        : correct yes/no = 1, incorrect or uncertain = 0  (UCB/eval signal)
+pseudo_soft_target : correct = 1, uncertain = 0.5, incorrect = 0     (GRPO signal)
+true_soft          : score = P_vlm("yes") if expected="yes" else 1 - P_vlm("yes"),
+                     derived from first-token logits — one call per question (slower)
 """
+import json
+import math
+import re
+import time
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 
 from adaptive_curriculum.reward.reward_schema import RewardModel
 
 
+# ---------------------------------------------------------------------------
+# Prompt builder and response parser (module-level, testable independently)
+# ---------------------------------------------------------------------------
+
+def build_vlm_question_prompt(target_questions: list) -> str:
+    """Build a multi-question prompt that asks Qwen to return all answers as JSON."""
+    lines = [
+        "You are evaluating whether an image satisfies a list of visual questions.",
+        "",
+        "Answer each question with exactly one of:",
+        "yes, no, uncertain",
+        "",
+        "Return only valid JSON in this format:",
+        '{',
+        '  "answers": [',
+        '    {"id": 0, "answer": "yes"},',
+        '    {"id": 1, "answer": "no"}',
+        '  ]',
+        '}',
+        "",
+        "Questions:",
+    ]
+    for i, q in enumerate(target_questions):
+        text = q.question if hasattr(q, "question") else q["question"]
+        lines.append(f"{i}. {text}")
+    return "\n".join(lines)
+
+
+def parse_vlm_json_answers(response_text: str, n_questions: int) -> Optional[List[str]]:
+    """
+    Parse Qwen JSON response into a list of n_questions answers.
+    Returns None if JSON cannot be parsed (triggers retry in caller).
+    Invalid answers are mapped to 'uncertain'.
+    """
+    valid = {"yes", "no", "uncertain"}
+    text = response_text.strip()
+    data = None
+
+    # 1. Direct parse
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # 2. Strip markdown code fence
+    if data is None:
+        m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+        if m:
+            try:
+                data = json.loads(m.group(1))
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+    # 3. Grab the first {...} block in the response (handles leading explanation text)
+    if data is None:
+        m = re.search(r"(\{.*\})", text, re.DOTALL)
+        if m:
+            try:
+                data = json.loads(m.group(1))
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+    if data is None:
+        return None
+
+    answers_raw = data.get("answers", [])
+    if not isinstance(answers_raw, list) or len(answers_raw) == 0:
+        return None
+
+    answers: List[str] = []
+    for entry in answers_raw:
+        if isinstance(entry, dict):
+            ans = str(entry.get("answer", "uncertain")).strip().lower()
+        else:
+            ans = str(entry).strip().lower()
+        answers.append(ans if ans in valid else "uncertain")
+
+    # Pad to n_questions if response was truncated
+    while len(answers) < n_questions:
+        answers.append("uncertain")
+
+    return answers[:n_questions]
+
+
+def _hard_score(predicted: str, expected: str) -> float:
+    return 1.0 if predicted == expected else 0.0
+
+
+def _pseudo_soft_score(predicted: str, expected: str) -> float:
+    if predicted == "uncertain":
+        return 0.5
+    return 1.0 if predicted == expected else 0.0
+
+
+# ---------------------------------------------------------------------------
+# Reward model class
+# ---------------------------------------------------------------------------
+
 class Qwen3VLRewardModel(RewardModel):
     """
-    Runs Qwen3-VL-4B-Instruct locally. No API key needed.
-    Answers yes/no/uncertain per target_question, scores via reward_rule formula.
+    Runs Qwen3-VL locally. No API key needed.
+    Uses one VLM call per image to answer all target questions (one-pass scoring).
     """
 
     def __init__(self, model_id: str = "Qwen/Qwen3-VL-4B-Instruct", device: str = "auto"):
@@ -18,6 +130,10 @@ class Qwen3VLRewardModel(RewardModel):
         self.device = device
         self._model = None
         self._processor = None
+        # efficiency counters
+        self._total_vlm_calls = 0
+        self._total_questions_answered = 0
+        self._total_vlm_seconds = 0.0
 
     def _load(self):
         if self._model is not None:
@@ -32,14 +148,11 @@ class Qwen3VLRewardModel(RewardModel):
         )
         self._model.eval()
 
-    def _ask(self, image, question: str) -> str:
-        """Returns 'yes', 'no', or 'uncertain'. image: path str or PIL.Image."""
-        import torch
+    def _build_inputs(self, image, prompt_text: str):
+        """Build model inputs from image (path str or PIL) and full prompt text."""
         from qwen_vl_utils import process_vision_info
-
         self._load()
 
-        # accept both file path and in-memory PIL image
         if isinstance(image, str):
             image_content = {"type": "image", "image": Path(image).as_uri()}
         else:
@@ -50,7 +163,7 @@ class Qwen3VLRewardModel(RewardModel):
                 "role": "user",
                 "content": [
                     image_content,
-                    {"type": "text", "text": f"{question}\nAnswer with only 'yes', 'no', or 'uncertain'."},
+                    {"type": "text", "text": prompt_text},
                 ],
             }
         ]
@@ -65,49 +178,171 @@ class Qwen3VLRewardModel(RewardModel):
             return_tensors="pt",
             padding=True,
         ).to(next(self._model.parameters()).device)
+        return inputs
 
+    def _generate_text(self, inputs, max_new_tokens: int) -> str:
+        import torch
         with torch.no_grad():
-            out_ids = self._model.generate(**inputs, max_new_tokens=8)
-        raw = self._processor.batch_decode(
+            out_ids = self._model.generate(**inputs, max_new_tokens=max_new_tokens)
+        return self._processor.batch_decode(
             out_ids[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True
-        )[0].strip().lower()
+        )[0].strip()
 
+    def _generate_with_scores(self, inputs, max_new_tokens: int):
+        """Generate and return (text, scores) for first-token probability extraction."""
+        import torch
+        with torch.no_grad():
+            out = self._model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                return_dict_in_generate=True,
+                output_scores=True,
+            )
+        text = self._processor.batch_decode(
+            out.sequences[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True
+        )[0].strip()
+        return text, out.scores
+
+    @staticmethod
+    def _parse_yes_no(raw: str) -> str:
+        raw = raw.strip().lower()
         if "uncertain" in raw:
             return "uncertain"
         if "yes" in raw:
             return "yes"
         return "no"
 
-    def score_image(self, image_path: str, item) -> dict:
-        reward_rule = getattr(item, "reward_rule", {}) or {}
-        uncertain_score = reward_rule.get("uncertain_score", 0.0)
+    def _ask_single(self, image, question: str) -> str:
+        """Single yes/no/uncertain answer for one question. Used by true_soft mode."""
+        prompt = f"{question}\nAnswer with only 'yes', 'no', or 'uncertain'."
+        inputs = self._build_inputs(image, prompt)
+        raw = self._generate_text(inputs, max_new_tokens=8)
+        return self._parse_yes_no(raw)
+
+    def _ask_single_with_prob(self, image, question: str) -> Tuple[str, float]:
+        """Single answer + P(yes) from first-token logits. Used by true_soft mode."""
+        prompt = f"{question}\nAnswer with only 'yes', 'no', or 'uncertain'."
+        inputs = self._build_inputs(image, prompt)
+        raw, scores = self._generate_with_scores(inputs, max_new_tokens=8)
+        answer = self._parse_yes_no(raw)
+
+        p_yes = 0.5  # safe fallback
+        if scores:
+            scores_0 = scores[0][0]  # (vocab_size,)
+            tok = self._processor.tokenizer
+
+            def max_logit(strings):
+                best = -1e9
+                for s in strings:
+                    ids = tok.encode(s, add_special_tokens=False)
+                    if ids:
+                        val = scores_0[ids[0]].item()
+                        if val > best:
+                            best = val
+                return best
+
+            yes_logit = max_logit(["yes", "Yes", "YES"])
+            no_logit = max_logit(["no", "No", "NO"])
+            p_yes = 1.0 / (1.0 + math.exp(-(yes_logit - no_logit)))
+
+        return answer, p_yes
+
+    def answer_all_questions_once(self, image, target_questions: list) -> List[str]:
+        """
+        One VLM call per image answers all target_questions simultaneously.
+        Falls back to ["uncertain"] * n if JSON parsing fails after one retry.
+        """
+        n = len(target_questions)
+        if n == 0:
+            return []
+
+        prompt = build_vlm_question_prompt(target_questions)
+        inputs = self._build_inputs(image, prompt)
+        raw = self._generate_text(inputs, max_new_tokens=256)
+        answers = parse_vlm_json_answers(raw, n)
+
+        if answers is None:
+            retry_prompt = prompt + "\n\nRespond ONLY with valid JSON. No additional text."
+            inputs2 = self._build_inputs(image, retry_prompt)
+            raw2 = self._generate_text(inputs2, max_new_tokens=256)
+            answers = parse_vlm_json_answers(raw2, n)
+
+        return answers if answers is not None else ["uncertain"] * n
+
+    def score_image(self, image, item, mode: str = "hard_target") -> dict:
+        target_questions = item.target_questions
+        n = len(target_questions)
+
+        t0 = time.time()
+
+        if mode == "true_soft":
+            # One call per question; extracts logit-based probability
+            answers = []
+            p_yes_list = []
+            for q in target_questions:
+                ans, p_yes = self._ask_single_with_prob(image, q.question)
+                answers.append(ans)
+                p_yes_list.append(p_yes)
+        else:
+            # One call per image for all questions (fast path)
+            answers = self.answer_all_questions_once(image, target_questions)
+            p_yes_list = [None] * n
+
+        vlm_seconds = time.time() - t0
+        vlm_calls = n if mode == "true_soft" else 1
+        self._total_vlm_calls += vlm_calls
+        self._total_questions_answered += n
+        self._total_vlm_seconds += vlm_seconds
 
         question_scores = []
-        correct_count = 0.0
+        for pred, q, p_yes in zip(answers, target_questions, p_yes_list):
+            expected = q.answer.lower()
 
-        for q in item.eval_questions:
-            predicted = self._ask(image_path, q.question)
-            if predicted == "uncertain":
-                correct = False
-                q_score = uncertain_score
-            else:
-                correct = predicted == q.answer.lower()
-                q_score = 1.0 if correct else 0.0
-            correct_count += q_score
+            if mode == "true_soft":
+                q_score = p_yes if expected == "yes" else (1.0 - p_yes)
+                correct = pred == expected
+            elif mode == "pseudo_soft_target":
+                q_score = _pseudo_soft_score(pred, expected)
+                correct = pred == expected
+            else:  # hard_target
+                q_score = _hard_score(pred, expected)
+                correct = pred == expected
+
             question_scores.append({
                 "question": q.question,
-                "expected": q.answer,
-                "predicted": predicted,
+                "expected": expected,
+                "predicted": pred,
                 "correct": correct,
-                "q_type": q.q_type,
+                "score": q_score,
+                "q_type": getattr(q, "q_type", "unknown"),
             })
 
-        n = len(item.eval_questions)
-        score = correct_count / n if n > 0 else 0.0
+        score = sum(qs["score"] for qs in question_scores) / n if n > 0 else 0.0
         return {
             "score": float(score),
             "question_scores": question_scores,
+            "mode": mode,
+            "vlm_seconds": vlm_seconds,
+            "num_questions": n,
         }
+
+    def get_efficiency_metrics(self) -> dict:
+        calls = self._total_vlm_calls
+        questions = self._total_questions_answered
+        seconds = self._total_vlm_seconds
+        return {
+            "num_vlm_calls": calls,
+            "num_questions_answered": questions,
+            "questions_per_vlm_call": questions / calls if calls > 0 else 0.0,
+            "vlm_seconds_total": seconds,
+            "vlm_seconds_per_image": seconds / calls if calls > 0 else 0.0,
+            "vlm_seconds_per_question": seconds / questions if questions > 0 else 0.0,
+        }
+
+    def reset_efficiency_counters(self):
+        self._total_vlm_calls = 0
+        self._total_questions_answered = 0
+        self._total_vlm_seconds = 0.0
 
 
 def build_reward_model(config) -> RewardModel:

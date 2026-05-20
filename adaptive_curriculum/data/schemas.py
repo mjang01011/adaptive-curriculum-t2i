@@ -15,7 +15,7 @@ class BucketItem:
     id: str
     bucket: str
     prompt: str
-    eval_questions: List[EvalQuestion]
+    target_questions: List[EvalQuestion]
     reward_rule: Dict[str, Any] = field(default_factory=dict)
     image_path: Optional[str] = None
 
@@ -25,13 +25,12 @@ class BucketItem:
 
     @classmethod
     def from_dict(cls, d: dict) -> "BucketItem":
-        # support both "target_questions" (actual JSONL) and "eval_questions" (legacy)
         raw_qs = d.get("target_questions") or d.get("eval_questions") or []
         questions = [
             EvalQuestion(
                 question=q["question"],
                 answer=q["answer"],
-                q_type=q.get("type", ""),
+                q_type=q.get("type", q.get("q_type", "")),
                 weight=q.get("weight", 1.0),
             )
             for q in raw_qs
@@ -40,7 +39,7 @@ class BucketItem:
             id=d["id"],
             bucket=d["bucket"],
             prompt=d.get("prompt") or d.get("caption") or "",
-            eval_questions=questions,
+            target_questions=questions,
             reward_rule=d.get("reward_rule", {}),
             image_path=d.get("image_path"),
         )
@@ -52,7 +51,7 @@ class BucketItem:
             "prompt": self.prompt,
             "target_questions": [
                 {"type": q.q_type, "question": q.question, "answer": q.answer}
-                for q in self.eval_questions
+                for q in self.target_questions
             ],
             "reward_rule": self.reward_rule,
         }

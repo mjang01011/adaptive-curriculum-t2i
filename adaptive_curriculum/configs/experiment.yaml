@@ -21,7 +21,7 @@ model:
   codebook_embed_dim: 8
   downsample_size: 16
   cls_token_num: 120
-  cfg_scale: 2.0
+  cfg_scale: 2.0          # generation CFG for eval and sampling
   temperature: 1.0
   top_k: 1000
   top_p: 1.0
@@ -29,10 +29,10 @@ model:
   mixed_precision: bf16
 
 lora:
-  rank: 8
-  alpha: 16
-  dropout: 0.05
-  start_layer: 18       # inject only on layers 18-35; shortens backward path to avoid float32 overflow
+  rank: 16
+  alpha: 32
+  dropout: 0.0
+  start_layer: 0
   target_modules:
     - wqkv
     - wo
@@ -43,7 +43,7 @@ buckets:
     - counting
     - spatial_relations
     - complex_composition
-  train_file: "{bucket}_train_80.jsonl"
+  train_file: "{bucket}_train_500.jsonl"
   val_file: "{bucket}_val_20.jsonl"
 
 training:
@@ -56,19 +56,26 @@ training:
   save_every: 20
 
 grpo:
-  num_samples: 8     # images generated per prompt per GRPO step (G)
-  beta: 0.0          # KL penalty weight vs reference; 0 = pure GRPO, stable for pilot
+  num_samples: 8            # images generated per prompt per GRPO step (G)
+  beta: 0.01                # KL penalty weight; set 0.0 to disable
+  cfg_scale_train: 2.0      # CFG scale for GRPO generation (matches eval CFG)
+  reward_mode: pseudo_soft_target  # GRPO reward: hard_target | pseudo_soft_target | true_soft
+  logprob_reduction: sum_sqrt_len  # mean | sum | sum_sqrt_len
+  advantage_eps: 1.0e-4     # added to reward std to prevent zero-std amplification
 
 evaluation:
   eval_every_curriculum_step: 1
   full_eval_every_curriculum_step: 10
-  num_val_prompts_per_bucket: 32
-  num_samples_per_prompt: 1
+  num_val_prompts_per_bucket: 20    # matches the 20-item val split
+  num_samples_per_prompt: 2
   reward_model: qwen3vl                        # heuristic | vlm (claude) | qwen3vl
   vlm_model: Qwen/Qwen3-VL-2B-Instruct
+  reward_mode: hard_target   # eval/UCB always uses hard_target for clean signal
+  cfg_scale: 2.0
 
 ucb:
   c: 0.25
+  epsilon: 0.1       # epsilon-greedy exploration after initial forced round-robin
   reward_ma_beta: 0.8
   improvement_ma_beta: 0.8
   initialize_with_base_eval: true

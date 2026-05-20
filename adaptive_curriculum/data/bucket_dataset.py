@@ -39,7 +39,7 @@ def _load_jsonl(path: Path) -> List[BucketItem]:
 def load_bucket_datasets(
     data_root: str,
     bucket_names: List[str],
-    train_file: str = "{bucket}_train_80.jsonl",
+    train_file: str = "{bucket}_train_500.jsonl",
     val_file: str = "{bucket}_val_20.jsonl",
     max_val_prompts: Optional[int] = None,
 ) -> Dict[str, BucketDataset]:

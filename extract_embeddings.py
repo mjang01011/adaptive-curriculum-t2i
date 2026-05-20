@@ -19,10 +19,10 @@ BATCH_SIZE    = 32
 # ─────────────────────────────────────────────────────────────────────────────
 
 BUCKETS = {
-    "attribute_binding":   ("attribute_binding_train_80.jsonl",    "attribute_binding_val_20.jsonl"),
-    "counting":            ("counting_train_80.jsonl",              "counting_val_20.jsonl"),
-    "spatial_relations":   ("spatial_relations_train_80.jsonl",     "spatial_relations_val_20.jsonl"),
-    "complex_composition": ("complex_composition_train_80.jsonl",   "complex_composition_val_20.jsonl"),
+    "attribute_binding":   ("attribute_binding_train_500.jsonl",    "attribute_binding_val_20.jsonl"),
+    "counting":            ("counting_train_500.jsonl",              "counting_val_20.jsonl"),
+    "spatial_relations":   ("spatial_relations_train_500.jsonl",     "spatial_relations_val_20.jsonl"),
+    "complex_composition": ("complex_composition_train_500.jsonl",   "complex_composition_val_20.jsonl"),
 }
 
 import importlib.util

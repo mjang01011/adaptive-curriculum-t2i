@@ -15,13 +15,13 @@ def _fake_score(item_id: str, image_path: str) -> float:
 
 
 class HeuristicRewardModel(RewardModel):
-    def score_image(self, image_path: str, item) -> dict:
-        base_score = _fake_score(item.id, image_path)
+    def score_image(self, image_path: str, item, mode: str = "hard_target") -> dict:
+        base_score = _fake_score(item.id, str(image_path))
 
         question_scores = []
-        total_weight = sum(q.weight for q in item.eval_questions)
+        total_weight = sum(q.weight for q in item.target_questions)
         weighted_sum = 0.0
-        for q in item.eval_questions:
+        for q in item.target_questions:
             q_key = f"{item.id}|{image_path}|{q.question}"
             q_h = hashlib.sha256(q_key.encode()).hexdigest()
             q_score = int(q_h[:8], 16) / 0xFFFFFFFF
@@ -41,7 +41,8 @@ class HeuristicRewardModel(RewardModel):
             "score": float(score),
             "question_scores": question_scores,
             "raw_response": None,
+            "mode": mode,
         }
 
-    def score_batch(self, image_paths: List[str], items: list) -> List[dict]:
-        return [self.score_image(p, item) for p, item in zip(image_paths, items)]
+    def score_batch(self, image_paths: List[str], items: list, mode: str = "hard_target") -> List[dict]:
+        return [self.score_image(p, item, mode=mode) for p, item in zip(image_paths, items)]
