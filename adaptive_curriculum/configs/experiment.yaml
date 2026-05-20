@@ -21,7 +21,7 @@ model:
   codebook_embed_dim: 8
   downsample_size: 16
   cls_token_num: 120
-  cfg_scale: 7.5
+  cfg_scale: 2.0
   temperature: 1.0
   top_k: 1000
   top_p: 1.0

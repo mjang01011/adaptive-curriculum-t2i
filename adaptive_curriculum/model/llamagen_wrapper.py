@@ -384,35 +384,56 @@ class LlamaGenWrapper:
         for block in self.gpt.layers:
             block.attention.kv_cache = None
 
-    def _compute_log_probs(self, image_tokens, c_indices, c_emb_masks):
+    def _compute_log_probs(self, image_tokens, c_indices, c_emb_masks, cfg_scale: float = 1.0):
         """
         Full forward pass → mean per-token log prob for each sequence.
         image_tokens: (B, seq_len) int64
+        When cfg_scale > 1.0, uses CFG logit combination (cond + uncond doubled batch)
+        so log probs are consistent with CFG-guided generation.
         Returns: (B,) float tensor
         """
         import torch.nn.functional as F
-        # must be in train mode so model trims logits to (B, seq_len, vocab_size)
         self.gpt.train()
         tokens_long = image_tokens.long()
-        # fp32 throughout — bfloat16 can overflow to NaN in deep transformer backward pass
+        B = tokens_long.shape[0]
         c_fp32 = c_indices.float()
-        with autocast(dtype=torch.float32, enabled=False):
-            logits, _ = self.gpt(
-                idx=tokens_long[:, :-1],
-                cond_idx=c_fp32,
-                input_pos=None,
-                targets=None,
-                mask=None,
-                valid=None,
-            )
-        # in train mode: logits[:, cls_token_num-1:] → (B, seq_len, vocab_size)
-        log_p = F.log_softmax(logits.float(), dim=-1)
+
+        if cfg_scale > 1.0:
+            # Doubled batch: [conditional, unconditional]
+            # unconditional uses zero conditioning (same convention as LlamaGen generate)
+            c_uncond = torch.zeros_like(c_fp32)
+            tokens_2x = tokens_long.repeat(2, 1)
+            c_2x = torch.cat([c_fp32, c_uncond], dim=0)
+            with autocast(dtype=torch.float32, enabled=False):
+                logits_2x, _ = self.gpt(
+                    idx=tokens_2x[:, :-1],
+                    cond_idx=c_2x,
+                    input_pos=None,
+                    targets=None,
+                    mask=None,
+                    valid=None,
+                )
+            logits_cond = logits_2x[:B].float()
+            logits_uncond = logits_2x[B:].float()
+            logits = logits_uncond + cfg_scale * (logits_cond - logits_uncond)
+        else:
+            with autocast(dtype=torch.float32, enabled=False):
+                logits, _ = self.gpt(
+                    idx=tokens_long[:, :-1],
+                    cond_idx=c_fp32,
+                    input_pos=None,
+                    targets=None,
+                    mask=None,
+                    valid=None,
+                )
+            logits = logits.float()
+
+        log_p = F.log_softmax(logits, dim=-1)
         token_lp = log_p.gather(-1, tokens_long.unsqueeze(-1)).squeeze(-1)  # (B, seq_len)
-        # nan_to_num handles both NaN and -inf from zero-probability tokens
         token_lp = token_lp.nan_to_num(nan=-20.0, neginf=-20.0)
         return token_lp.mean(dim=-1)  # (B,) mean over tokens
 
-    def _compute_log_probs_ref(self, image_tokens, c_indices, c_emb_masks):
+    def _compute_log_probs_ref(self, image_tokens, c_indices, c_emb_masks, cfg_scale: float = 1.0):
         """Log probs under reference model (LoRA zeroed = base model)."""
         saved = {}
         for name, mod in self.gpt.named_modules():
@@ -420,7 +441,7 @@ class LlamaGenWrapper:
                 saved[name] = mod.lora_B.weight.data.clone()
                 mod.lora_B.weight.data.zero_()
         with torch.no_grad():
-            lp = self._compute_log_probs(image_tokens, c_indices, c_emb_masks)
+            lp = self._compute_log_probs(image_tokens, c_indices, c_emb_masks, cfg_scale=cfg_scale)
         for name, mod in self.gpt.named_modules():
             if name in saved:
                 mod.lora_B.weight.data.copy_(saved[name])
@@ -459,7 +480,7 @@ class LlamaGenWrapper:
                 index_sample = generate(
                     self.gpt, c_indices, self.latent_size ** 2,
                     c_emb_masks,
-                    cfg_scale=1.0,   # no CFG during GRPO — log probs must match generation dist
+                    cfg_scale=self.cfg_scale,
                     temperature=self.temperature,
                     top_k=self.top_k,
                     top_p=self.top_p,
@@ -501,7 +522,7 @@ class LlamaGenWrapper:
         ref_log_probs = None
         if beta > 0.0:
             with torch.no_grad():
-                ref_log_probs = self._compute_log_probs_ref(stacked_tokens, rep_c, rep_masks)
+                ref_log_probs = self._compute_log_probs_ref(stacked_tokens, rep_c, rep_masks, cfg_scale=self.cfg_scale)
 
         # 7. Chunked gradient accumulation — avoids OOM from full B*G forward with grad
         chunk_size = B  # process one prompt's samples at a time
@@ -518,7 +539,7 @@ class LlamaGenWrapper:
             c_adv = flat_advantages[start:end]
             weight = (end - start) / total  # normalise so gradients sum correctly
 
-            lp = self._compute_log_probs(c_tok, c_cond, c_mask)
+            lp = self._compute_log_probs(c_tok, c_cond, c_mask, cfg_scale=self.cfg_scale)
             pg = -(c_adv * lp).mean() * weight
 
             if beta > 0.0 and ref_log_probs is not None:
