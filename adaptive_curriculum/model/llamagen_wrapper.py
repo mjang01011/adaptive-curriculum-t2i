@@ -322,13 +322,11 @@ class LlamaGenWrapper:
         with autocast(dtype=amp_dtype, enabled=use_amp):
             logits, _ = self.gpt(
                 idx=targets[:, :-1],
-                cond_idx=None,
+                cond_idx=c_indices,
                 input_pos=None,
                 targets=targets,
                 mask=None,
                 valid=None,
-                c_emb=c_indices,
-                c_emb_masks=c_emb_masks,
             )
             # cross-entropy over image token predictions
             loss = torch.nn.functional.cross_entropy(
@@ -388,22 +386,22 @@ class LlamaGenWrapper:
         Returns: (B,) float tensor
         """
         import torch.nn.functional as F
+        # must be in train mode so model trims logits to (B, seq_len, vocab_size)
+        self.gpt.train()
         use_amp = self.precision in ("bf16", "fp16")
         with autocast(dtype=self.dtype, enabled=use_amp):
             logits, _ = self.gpt(
                 idx=image_tokens[:, :-1],
-                cond_idx=None,
+                cond_idx=c_indices,
                 input_pos=None,
                 targets=image_tokens,
                 mask=None,
                 valid=None,
-                c_emb=c_indices,
-                c_emb_masks=c_emb_masks,
             )
-        # logits: (B, seq_len, vocab_size)
+        # in train mode: logits[:, cls_token_num-1:] → (B, seq_len, vocab_size)
         log_p = F.log_softmax(logits.float(), dim=-1)
         token_lp = log_p.gather(-1, image_tokens.unsqueeze(-1)).squeeze(-1)  # (B, seq_len)
-        return token_lp.mean(dim=-1)  # (B,) mean over tokens for stability
+        return token_lp.mean(dim=-1)  # (B,) mean over tokens
 
     def _compute_log_probs_ref(self, image_tokens, c_indices, c_emb_masks):
         """Log probs under reference model (LoRA zeroed = base model)."""
