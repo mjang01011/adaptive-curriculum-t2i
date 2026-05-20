@@ -487,54 +487,57 @@ class LlamaGenWrapper:
         advantages = ((rewards - mean_r) / std_r)    # (B, num_samples)
 
         # 5. Stack tokens: (B * num_samples, seq_len)
-        # interleave so batch dim stays grouped: [b0_s0, b0_s1, ..., b1_s0, ...]
         stacked_tokens = torch.stack(all_tokens, dim=1).reshape(B * num_samples, -1)
-        # repeat conditioning
         rep_c = c_indices.repeat_interleave(num_samples, dim=0)
         rep_masks = c_emb_masks.repeat_interleave(num_samples, dim=0)
         flat_advantages = advantages.reshape(-1).to(self.device)  # (B * num_samples,)
 
-        # 6. Compute log probs under current policy (with grad)
-        self.gpt.train()
-        self._optimizer.zero_grad()
-
-        log_probs = self._compute_log_probs(stacked_tokens, rep_c, rep_masks)  # (B*G,)
-
-        # 7. GRPO loss = -mean(A * log_p)
-        pg_loss = -(flat_advantages * log_probs).mean()
-
-        # 8. Optional KL penalty vs reference (base model, LoRA zeroed)
+        # 6. KL reference log probs (no grad, base model)
         kl_loss = torch.tensor(0.0, device=self.device)
+        ref_log_probs = None
         if beta > 0.0:
             with torch.no_grad():
                 ref_log_probs = self._compute_log_probs_ref(stacked_tokens, rep_c, rep_masks)
-            kl_loss = (log_probs - ref_log_probs).mean()
 
-        loss = pg_loss + beta * kl_loss
+        # 7. Chunked gradient accumulation — avoids OOM from full B*G forward with grad
+        chunk_size = B  # process one prompt's samples at a time
+        total = B * num_samples
+        self._optimizer.zero_grad()
+        total_pg_loss = 0.0
+        total_kl = 0.0
 
-        use_amp = self.precision in ("bf16", "fp16")
-        if self._scaler is not None:
-            self._scaler.scale(loss).backward()
-            self._scaler.unscale_(self._optimizer)
-            grad_norm = torch.nn.utils.clip_grad_norm_(
-                [p for p in self.gpt.parameters() if p.requires_grad],
-                self.max_grad_norm,
-            ).item()
-            self._scaler.step(self._optimizer)
-            self._scaler.update()
-        else:
-            loss.backward()
-            grad_norm = torch.nn.utils.clip_grad_norm_(
-                [p for p in self.gpt.parameters() if p.requires_grad],
-                self.max_grad_norm,
-            ).item()
-            self._optimizer.step()
+        for start in range(0, total, chunk_size):
+            end = min(start + chunk_size, total)
+            c_tok = stacked_tokens[start:end]
+            c_cond = rep_c[start:end]
+            c_mask = rep_masks[start:end]
+            c_adv = flat_advantages[start:end]
+            weight = (end - start) / total  # normalise so gradients sum correctly
+
+            lp = self._compute_log_probs(c_tok, c_cond, c_mask)
+            pg = -(c_adv * lp).mean() * weight
+
+            if beta > 0.0 and ref_log_probs is not None:
+                kl_chunk = (lp - ref_log_probs[start:end]).mean() * weight
+                chunk_loss = pg + beta * kl_chunk
+                total_kl += kl_chunk.item()
+            else:
+                chunk_loss = pg
+
+            chunk_loss.backward()
+            total_pg_loss += pg.item()
+
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            [p for p in self.gpt.parameters() if p.requires_grad],
+            self.max_grad_norm,
+        ).item()
+        self._optimizer.step()
 
         self._step += 1
         return {
-            "loss": loss.item(),
-            "pg_loss": pg_loss.item(),
-            "kl_loss": kl_loss.item(),
+            "loss": total_pg_loss + beta * total_kl,
+            "pg_loss": total_pg_loss,
+            "kl_loss": total_kl,
             "mean_reward": rewards.mean().item(),
             "reward_std": rewards.std().item(),
             "lr": self._optimizer.param_groups[0]["lr"],
