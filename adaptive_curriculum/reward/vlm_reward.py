@@ -254,30 +254,45 @@ class Qwen3VLRewardModel(RewardModel):
         return self._parse_yes_no(raw)
 
     def _ask_single_with_prob(self, image, question: str) -> Tuple[str, float]:
-        """Single answer + P(yes) from first-token logits. Used by true_soft mode."""
+        """
+        Single answer + P(yes) from next-token logits via a forward pass.
+        Avoids output_scores=True in generate(), which crashes with Qwen3-VL
+        when a second model (LlamaGen) is loaded concurrently on the same GPU.
+        """
+        import torch
         prompt = f"{question}\nAnswer with only 'yes', 'no', or 'uncertain'."
         inputs = self._build_inputs(image, prompt)
-        raw, scores = self._generate_with_scores(inputs, max_new_tokens=8)
-        answer = self._parse_yes_no(raw)
 
-        p_yes = 0.5  # safe fallback
-        if scores:
-            scores_0 = scores[0][0]  # (vocab_size,)
-            tok = self._processor.tokenizer
+        with torch.no_grad():
+            outputs = self._model(**inputs)
+        # logits: (1, seq_len, vocab_size) — last position predicts first answer token
+        last_logits = outputs.logits[0, -1, :]
 
-            def max_logit(strings):
-                best = -1e9
-                for s in strings:
-                    ids = tok.encode(s, add_special_tokens=False)
-                    if ids:
-                        val = scores_0[ids[0]].item()
-                        if val > best:
-                            best = val
-                return best
+        tok = self._processor.tokenizer
 
-            yes_logit = max_logit(["yes", "Yes", "YES"])
-            no_logit = max_logit(["no", "No", "NO"])
-            p_yes = 1.0 / (1.0 + math.exp(-(yes_logit - no_logit)))
+        def max_logit(strings):
+            best = -1e9
+            for s in strings:
+                ids = tok.encode(s, add_special_tokens=False)
+                if ids:
+                    val = last_logits[ids[0]].item()
+                    if val > best:
+                        best = val
+            return best
+
+        yes_logit = max_logit(["yes", "Yes", "YES"])
+        no_logit  = max_logit(["no", "No", "NO"])
+        unc_logit = max_logit(["uncertain", "Uncertain"])
+
+        p_yes = 1.0 / (1.0 + math.exp(-(yes_logit - no_logit)))
+
+        # discrete answer from argmax of the three candidates
+        if unc_logit > yes_logit and unc_logit > no_logit:
+            answer = "uncertain"
+        elif yes_logit >= no_logit:
+            answer = "yes"
+        else:
+            answer = "no"
 
         return answer, p_yes
 
