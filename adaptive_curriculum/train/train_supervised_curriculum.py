@@ -186,6 +186,10 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
     best_avg_reward = -float("inf")
     best_checkpoint = None
 
+    # reward detail log — per-image soft+hard rewards for alignment analysis
+    reward_detail_path = str(run_dir / "reward_details.jsonl")
+    _reward_detail_file = open(reward_detail_path, "w", encoding="utf-8")
+
     for step in range(num_steps):
         t_step_start = time.time()
 
@@ -214,6 +218,15 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
                         advantage_eps=grpo_advantage_eps,
                     )
                     train_metrics_list.append(metrics)
+                    # write per-image reward details for alignment analysis
+                    if hasattr(model, "_last_sample_details"):
+                        for detail in model._last_sample_details:
+                            detail["global_step"] = step
+                            detail["grad_step"] = g
+                            _reward_detail_file.write(
+                                __import__("json").dumps(detail) + "\n"
+                            )
+                        _reward_detail_file.flush()
                     if (g + 1) % 4 == 0:
                         print(f"  [grpo {g+1}/{grad_steps_per}] loss={metrics['loss']:.4f}  "
                               f"reward={metrics['mean_reward']:.3f}  grad_norm={metrics['grad_norm']:.3f}  "
@@ -348,6 +361,7 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
         "total_generated_images": total_generated,
     }
     write_json(str(run_dir / "final_summary.json"), summary)
+    _reward_detail_file.close()
     print(f"\n[train] Done. avg_final_reward={avg_final:.4f}  run_dir={run_dir}")
 
     # plots

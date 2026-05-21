@@ -1,0 +1,42 @@
+# Phase 1 gatekeeper: can GRPO improve attribute_binding?
+# Easier than spatial — if this fails, the GRPO loop itself is broken.
+# If this passes but spatial fails, spatial reward/difficulty is the bottleneck.
+#
+# Usage: EXPERIMENT=attribute_only_overfit STRATEGY=fixed_bucket sbatch train_curriculum.sh
+
+fixed_bucket: attribute_binding
+
+training:
+  num_curriculum_steps: 20
+  gradient_steps_per_curriculum_step: 4
+  train_batch_size: 4
+  learning_rate: 5.0e-5
+  max_grad_norm: 1.0
+  save_checkpoints: true
+  save_every: 5
+
+grpo:
+  num_samples: 6
+  beta: 0.02
+  cfg_scale_train: 2.0
+  reward_mode: pseudo_soft_target
+  logprob_reduction: sum_sqrt_len
+  advantage_eps: 1.0e-4
+
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.0
+  start_layer: 0
+  target_modules: [wqkv, wo]
+
+evaluation:
+  cfg_scale: 2.0
+  full_eval_every_curriculum_step: 5
+  num_val_prompts_per_bucket: 20
+  num_samples_per_prompt: 4
+  reward_mode: hard_target
+
+ucb:
+  c: 0.25
+  epsilon: 0.1

@@ -532,12 +532,30 @@ class LlamaGenWrapper:
         self._disable_kv_cache()
 
         # 3. Score all images with reward model (PIL, no file paths)
+        # Also compute hard_target score from same VLM call for reward alignment logging.
         rewards = torch.zeros(B, num_samples)
+        self._last_sample_details = []  # captured for reward_details.jsonl logging
         for s in range(num_samples):
             for i, item in enumerate(batch):
                 pil_img = all_pil_imgs[s * B + i]
-                score = reward_model.score_image(pil_img, item, mode=reward_mode)["score"]
-                rewards[i, s] = score
+                soft_result = reward_model.score_image(pil_img, item, mode=reward_mode)
+                soft_score = soft_result["score"]
+                rewards[i, s] = soft_score
+                # compute hard score from same answers (no extra VLM call if possible)
+                hard_result = reward_model.score_image(pil_img, item, mode="hard_target")
+                self._last_sample_details.append({
+                    "prompt_id": item.id,
+                    "prompt": item.text,
+                    "bucket": item.bucket,
+                    "sample": s,
+                    "soft_reward": float(soft_score),
+                    "hard_reward": float(hard_result["score"]),
+                    "has_uncertain": any(
+                        q.get("answer", "") == "uncertain"
+                        for q in soft_result.get("question_scores", [])
+                    ),
+                    "question_scores": soft_result.get("question_scores", []),
+                })
 
         # 4. Group-relative advantages per prompt
         mean_r = rewards.mean(dim=1, keepdim=True)   # (B, 1)

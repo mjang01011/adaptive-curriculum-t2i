@@ -18,10 +18,11 @@ fixed_bucket: spatial_relations
 training:
   num_curriculum_steps: 30
   gradient_steps_per_curriculum_step: 4
-  train_batch_size: 2
+  train_batch_size: 4
   learning_rate: 5.0e-5
   max_grad_norm: 1.0
-  save_checkpoints: false
+  save_checkpoints: true
+  save_every: 5
 
 grpo:
   num_samples: 6
