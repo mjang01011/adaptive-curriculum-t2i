@@ -575,9 +575,11 @@ class LlamaGenWrapper:
         self.gpt.float()
         kl_loss = torch.tensor(0.0, device=self.device)
         ref_log_probs = None
+        ref_logprob_mean = float("nan")
         if beta > 0.0:
             with torch.no_grad():
                 ref_log_probs = self._compute_log_probs_ref(stacked_tokens, rep_c, rep_masks, cfg_scale=1.0)
+            ref_logprob_mean = float(ref_log_probs.mean().item())
 
         # 7. Chunked gradient accumulation — avoids OOM from full B*G forward with grad
         # Log probs use conditional-only forward (cfg_scale=1.0): zero unconditional conditioning
@@ -672,6 +674,7 @@ class LlamaGenWrapper:
             "fraction_nonzero_advantage": float((flat_adv > 1e-6).float().mean().item()),
             "seq_logprob_mean": float(seq_lp_t.mean().item()),
             "seq_logprob_std": float(seq_lp_t.std().item()) if len(seq_lp_t) > 1 else 0.0,
+            "ref_logprob_mean": ref_logprob_mean,
             "cfg_scale_train": self.cfg_scale_train,
             "logprob_reduction": self.logprob_reduction,
             "reward_mode": reward_mode,

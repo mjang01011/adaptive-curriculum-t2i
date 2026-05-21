@@ -74,6 +74,7 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
         git_commit = "unknown"
     run_name = getattr(getattr(config, "logging", None), "run_name", run_dir.name)
     fixed_bucket = getattr(config, "fixed_bucket", None)
+    grpo_cfg_meta = getattr(config, "grpo", None)
     metadata = {
         "experiment": os.environ.get("EXPERIMENT", run_name),
         "strategy": strategy,
@@ -83,6 +84,11 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
         "git_commit": git_commit,
         "data_root": str(getattr(config.paths, "data_root", "data")),
         "bucket": fixed_bucket,
+        "reward_mode": str(getattr(grpo_cfg_meta, "reward_mode", "hard_target")) if grpo_cfg_meta else "hard_target",
+        "learning_rate": float(getattr(config.training, "learning_rate", 0)),
+        "beta": float(getattr(grpo_cfg_meta, "beta", 0)) if grpo_cfg_meta else 0,
+        "train_batch_size": int(getattr(config.training, "train_batch_size", 4)),
+        "num_samples": int(getattr(grpo_cfg_meta, "num_samples", 6)) if grpo_cfg_meta else 6,
     }
     write_json(str(run_dir / "run_metadata.json"), metadata)
     print(f"[train] Metadata: experiment={metadata['experiment']}  job={metadata['slurm_job_id']}  bucket={fixed_bucket}")
@@ -225,6 +231,31 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
         if b != "__pooled__"
     }
 
+    # save fixed probe manifest
+    if probe_enabled:
+        for b, items in probe_items.items():
+            if items:
+                write_json(str(run_dir / "fixed_probe_items.json"), {
+                    "bucket": b,
+                    "prompt_ids": [it.id for it in items],
+                    "seeds": probe_seeds,
+                    "num_images": len(items) * len(probe_seeds),
+                })
+                break  # one file per run (fixed_bucket always has one active bucket)
+
+    # early-stop state
+    es_cfg = getattr(config, "early_stop", None)
+    es_enabled = bool(getattr(es_cfg, "enabled", False))
+    es_min_delta = float(getattr(es_cfg, "min_delta_from_base", -0.05))
+    es_patience = int(getattr(es_cfg, "patience_probes", 2))
+    es_kl_threshold = float(getattr(es_cfg, "kl_threshold", 5.0))
+    es_presence_drop = float(getattr(es_cfg, "presence_drop_threshold", 0.15))
+    _base_probe_mean: dict = {}      # bucket -> float
+    _base_probe_presence: dict = {}  # bucket -> float
+    _es_drop_count: dict = {}        # bucket -> int
+    _es_success_count: dict = {}     # bucket -> int
+    _es_triggered = False
+
     # base fixed probe (step=-1) — run once before any GRPO updates
     if probe_enabled and model is not None:
         import statistics as _stats
@@ -267,6 +298,11 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
                 logger.log_probe_eval(-1, _pb_bucket, probe_result)
                 qtype_str = "  ".join(f"{qt}={v:.3f}" for qt, v in sorted(_pb_qtype_means.items()))
                 print(f"  [probe base] {_pb_bucket}  mean={pmean:.4f}  se={pse:.4f}  n={len(_pb_rewards)}  {qtype_str}")
+                # record base for early stopping
+                _base_probe_mean[_pb_bucket] = pmean
+                _base_probe_presence[_pb_bucket] = _pb_qtype_means.get("object_presence", float("nan"))
+                _es_drop_count[_pb_bucket] = 0
+                _es_success_count[_pb_bucket] = 0
 
     total_generated = 0
     t_start = time.time()
@@ -305,20 +341,42 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
                         advantage_eps=grpo_advantage_eps,
                     )
                     train_metrics_list.append(metrics)
-                    # write per-image reward details for alignment analysis
+                    # write per-image reward details (flat format) for alignment analysis
                     if hasattr(model, "_last_sample_details"):
-                        for detail in model._last_sample_details:
-                            detail["global_step"] = step
-                            detail["grad_step"] = g
-                            _reward_detail_file.write(
-                                __import__("json").dumps(detail) + "\n"
+                        _json = __import__("json")
+                        for _si, detail in enumerate(model._last_sample_details):
+                            cs = detail.get("component_scores", {})
+                            uncertain_q = sum(
+                                1 for q in detail.get("question_scores", [])
+                                if q.get("predicted", "") == "uncertain"
                             )
+                            flat = {
+                                "step": step,
+                                "grad_step": g,
+                                "bucket": detail.get("bucket", bucket),
+                                "prompt_id": detail.get("prompt_id", ""),
+                                "sample_index": detail.get("sample", _si),
+                                "image_path": detail.get("image_path", ""),
+                                "grpo_total_score": detail.get("soft_reward", float("nan")),
+                                "hard_target_score": detail.get("hard_reward", float("nan")),
+                                "target_component_score": cs.get("attribute", cs.get("relation", float("nan"))),
+                                "presence_component_score": cs.get("object_presence", float("nan")),
+                                "anti_component_score": cs.get("anti_swap", cs.get("anti_relation", float("nan"))),
+                                "quality_component_score": cs.get("image_quality", float("nan")),
+                                "alignment_component_score": cs.get("prompt_alignment", float("nan")),
+                                "uncertain_count_grpo": uncertain_q,
+                                "uncertain_count_target": 0,
+                            }
+                            _reward_detail_file.write(_json.dumps(flat) + "\n")
                         _reward_detail_file.flush()
                     if (g + 1) % 4 == 0:
+                        _kl = metrics.get("kl_loss", float("nan"))
+                        _ref_lp = metrics.get("ref_logprob_mean", float("nan"))
                         print(f"  [grpo {g+1}/{grad_steps_per}] loss={metrics['loss']:.4f}  "
                               f"reward={metrics['mean_reward']:.3f}  grad_norm={metrics['grad_norm']:.3f}  "
                               f"zero_std={metrics.get('percent_groups_zero_std', 0):.0f}%  "
-                              f"mean_adv={metrics.get('mean_abs_advantage', 0):.3f}")
+                              f"mean_adv={metrics.get('mean_abs_advantage', 0):.3f}  "
+                              f"kl={_kl:.4f}  ref_lp={_ref_lp:.3f}")
 
         if train_metrics_list:
             n = len(train_metrics_list)
@@ -345,6 +403,7 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
                 "fraction_nonzero_advantage": _avg("fraction_nonzero_advantage"),
                 "seq_logprob_mean": _avg("seq_logprob_mean"),
                 "seq_logprob_std": _avg("seq_logprob_std"),
+                "ref_logprob_mean": _avg("ref_logprob_mean"),
                 "cfg_scale_train": train_metrics_list[-1].get("cfg_scale_train", 2.0),
                 "logprob_reduction": train_metrics_list[-1].get("logprob_reduction", "sum_sqrt_len"),
                 "reward_mode": train_metrics_list[-1].get("reward_mode", grpo_reward_mode),
@@ -439,6 +498,43 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
                     logger.log_probe_eval(step, _probe_bucket, probe_result)
                     qtype_str = "  ".join(f"{qt}={v:.3f}" for qt, v in sorted(_probe_qtype_means.items()))
                     print(f"  [probe step={step}] {_probe_bucket}  mean={pmean:.4f}  se={pse:.4f}  n={len(probe_rewards)}  {qtype_str}")
+
+                    # early stopping check
+                    if es_enabled and _probe_bucket in _base_probe_mean:
+                        import math as _math
+                        base = _base_probe_mean[_probe_bucket]
+                        base_pres = _base_probe_presence.get(_probe_bucket, float("nan"))
+                        curr_pres = _probe_qtype_means.get("object_presence", float("nan"))
+                        avg_kl = sum(m.get("kl_loss", 0) for m in train_metrics_list) / max(len(train_metrics_list), 1)
+
+                        pres_drop = (base_pres - curr_pres) if not _math.isnan(base_pres) and not _math.isnan(curr_pres) else 0.0
+                        kl_spike = avg_kl > es_kl_threshold
+
+                        if pmean <= base + es_min_delta:
+                            _es_drop_count[_probe_bucket] = _es_drop_count.get(_probe_bucket, 0) + 1
+                            _es_success_count[_probe_bucket] = 0
+                        elif pmean >= base + 0.05:
+                            _es_success_count[_probe_bucket] = _es_success_count.get(_probe_bucket, 0) + 1
+                            _es_drop_count[_probe_bucket] = 0
+                        else:
+                            _es_drop_count[_probe_bucket] = 0
+                            _es_success_count[_probe_bucket] = 0
+
+                        drop_count = _es_drop_count.get(_probe_bucket, 0)
+                        success_count = _es_success_count.get(_probe_bucket, 0)
+
+                        if drop_count >= es_patience or kl_spike or pres_drop > es_presence_drop:
+                            reason = (f"probe_drop(patience={drop_count})" if drop_count >= es_patience else
+                                      f"kl_spike(kl={avg_kl:.3f})" if kl_spike else
+                                      f"presence_drop({pres_drop:.3f})")
+                            print(f"  [early_stop] base={base:.4f}  current={pmean:.4f}  {reason}  STOP")
+                            _es_triggered = True
+                        elif success_count >= es_patience:
+                            print(f"  [early_stop] base={base:.4f}  current={pmean:.4f}  success(count={success_count})  CONTINUE")
+
+        if _es_triggered:
+            print(f"[train] Early stopping at step {step}.")
+            break
 
         # 5. Update sampler
         reward_info = {

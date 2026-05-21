@@ -1,0 +1,56 @@
+# Stable single-bucket GRPO: attribute_binding.
+# Key changes from v3: lr 5e-5→2e-5, beta 0.02→0.05.
+# Motivation: best-of-G shows reward ranks well (r=0.61, delta=0.15), so
+# the bottleneck is update stability, not reward quality. Lower LR and
+# stronger KL regularization prevent drift from the pretrained visual prior.
+# Early stopping halts training if fixed probe drops >0.05 for 2 probes.
+#
+# Usage: EXPERIMENT=attribute_only_overfit_v3_stable STRATEGY=fixed_bucket sbatch train_curriculum.sh
+
+fixed_bucket: attribute_binding
+
+training:
+  num_curriculum_steps: 20
+  gradient_steps_per_curriculum_step: 4
+  train_batch_size: 4
+  learning_rate: 2.0e-5
+  max_grad_norm: 1.0
+  save_checkpoints: true
+  save_every: 5
+
+grpo:
+  num_samples: 6
+  beta: 0.05
+  cfg_scale_train: 2.0
+  reward_mode: pseudo_soft_grpo_target_heavy
+  logprob_reduction: sum_sqrt_len
+  advantage_eps: 1.0e-4
+
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.0
+  start_layer: 0
+  target_modules: [wqkv, wo]
+
+evaluation:
+  cfg_scale: 2.0
+  full_eval_every_curriculum_step: 10
+  num_val_prompts_per_bucket: 20
+  num_samples_per_prompt: 4
+  reward_mode: hard_target
+  eval_probe_fixed: true
+  probe_num_prompts: 8
+  probe_seeds: [0, 1, 2, 3]
+  eval_probe_every: 2
+
+early_stop:
+  enabled: true
+  min_delta_from_base: -0.05
+  patience_probes: 2
+  kl_threshold: 5.0
+  presence_drop_threshold: 0.15
+
+ucb:
+  c: 0.25
+  epsilon: 0.1
