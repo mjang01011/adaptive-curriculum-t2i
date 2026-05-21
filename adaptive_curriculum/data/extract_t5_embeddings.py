@@ -30,10 +30,10 @@ import torch
 
 
 BUCKET_SPLITS = {
-    "attribute_binding":  {"train": "attribute_binding_train_500.jsonl",   "val": "attribute_binding_val_20.jsonl"},
-    "counting":           {"train": "counting_train_500.jsonl",             "val": "counting_val_20.jsonl"},
-    "spatial_relations":  {"train": "spatial_relations_train_500.jsonl",    "val": "spatial_relations_val_20.jsonl"},
-    "complex_composition":{"train": "complex_composition_train_500.jsonl",  "val": "complex_composition_val_20.jsonl"},
+    "attribute_binding":       {"train": "attribute_binding_train_500.jsonl",            "val": "attribute_binding_val_20.jsonl"},
+    "counting":                {"train": "counting_train_500.jsonl",                     "val": "counting_val_20.jsonl"},
+    "spatial_relations_anchored": {"train": "spatial_relations_anchored_train_500.jsonl","val": "spatial_relations_anchored_val_20.jsonl"},
+    "complex_composition":     {"train": "complex_composition_train_500.jsonl",          "val": "complex_composition_val_20.jsonl"},
 }
 
 

@@ -41,7 +41,7 @@ buckets:
   names:
     - attribute_binding
     - counting
-    - spatial_relations
+    - spatial_relations_anchored
     - complex_composition
   train_file: "{bucket}_train_500.jsonl"
   val_file: "{bucket}_val_20.jsonl"
@@ -59,7 +59,7 @@ grpo:
   num_samples: 8            # images generated per prompt per GRPO step (G)
   beta: 0.01                # KL penalty weight; set 0.0 to disable
   cfg_scale_train: 2.0      # CFG scale for GRPO generation (matches eval CFG)
-  reward_mode: pseudo_soft_target  # GRPO reward: hard_target | pseudo_soft_target | true_soft
+  reward_mode: pseudo_soft_grpo  # GRPO reward: hard_target | pseudo_soft_target | pseudo_soft_grpo | true_soft
   logprob_reduction: sum_sqrt_len  # mean | sum | sum_sqrt_len
   advantage_eps: 1.0e-4     # added to reward std to prevent zero-std amplification
 
@@ -86,9 +86,9 @@ static_curriculum:
       steps: 50
     - buckets: ["attribute_binding", "counting"]
       steps: 50
-    - buckets: ["attribute_binding", "counting", "spatial_relations"]
+    - buckets: ["attribute_binding", "counting", "spatial_relations_anchored"]
       steps: 50
-    - buckets: ["attribute_binding", "counting", "spatial_relations", "complex_composition"]
+    - buckets: ["attribute_binding", "counting", "spatial_relations_anchored", "complex_composition"]
       steps: 50
 
 logging:

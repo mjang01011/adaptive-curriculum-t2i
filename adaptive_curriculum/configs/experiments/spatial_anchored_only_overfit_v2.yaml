@@ -1,0 +1,46 @@
+# Gatekeeper v2: can GRPO improve spatial_relations_anchored with new grounded dataset?
+# Uses pseudo_soft_grpo reward mode (grpo_reward_questions with per-question weights).
+# Anchored prompts give the model color grounding signals alongside spatial supervision,
+# which should reduce reward noise from object confusion.
+#
+# If spatial val reward trends upward over 30 steps → proceed to UCB comparisons.
+# If it flatlines or fluctuates → fix reward/GRPO before running curriculum comparisons.
+#
+# Usage: EXPERIMENT=spatial_anchored_only_overfit_v2 STRATEGY=fixed_bucket sbatch train_curriculum.sh
+
+fixed_bucket: spatial_relations_anchored
+
+training:
+  num_curriculum_steps: 30
+  gradient_steps_per_curriculum_step: 4
+  train_batch_size: 4
+  learning_rate: 5.0e-5
+  max_grad_norm: 1.0
+  save_checkpoints: true
+  save_every: 5
+
+grpo:
+  num_samples: 6
+  beta: 0.02
+  cfg_scale_train: 2.0
+  reward_mode: pseudo_soft_grpo
+  logprob_reduction: sum_sqrt_len
+  advantage_eps: 1.0e-4
+
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.0
+  start_layer: 0
+  target_modules: [wqkv, wo]
+
+evaluation:
+  cfg_scale: 2.0
+  full_eval_every_curriculum_step: 2
+  num_val_prompts_per_bucket: 20
+  num_samples_per_prompt: 4
+  reward_mode: hard_target
+
+ucb:
+  c: 0.25
+  epsilon: 0.1
