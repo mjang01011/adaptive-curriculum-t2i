@@ -44,7 +44,7 @@ export PYTHONPATH=$PROJECT:$LLAMAGEN:$PYTHONPATH
 
 mkdir -p /viscam/u/jj277/adaptive-curriculum-t2i/logs
 
-python3 -m adaptive_curriculum.train.run_experiment \
+/viscam/u/jj277/svl/bin/python3 -m adaptive_curriculum.train.run_experiment \
     --config $PROJECT/adaptive_curriculum/configs/experiment.yaml \
     --experiment $PROJECT/adaptive_curriculum/configs/experiments/${EXPERIMENT}.yaml \
     --strategy $STRATEGY \
