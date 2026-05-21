@@ -54,7 +54,8 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
     set_seed(config.seed)
 
     output_root = output_root or config.paths.output_root
-    run_dir = make_run_dir(output_root, strategy, config.project_name)
+    experiment_name = getattr(getattr(config, "logging", None), "run_name", None)
+    run_dir = make_run_dir(output_root, strategy, config.project_name, experiment_name=experiment_name)
     print(f"[train] Run dir: {run_dir}")
 
     # save resolved config
@@ -181,6 +182,20 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
     full_eval_every = config.evaluation.full_eval_every_curriculum_step
     num_samples = config.evaluation.num_samples_per_prompt
 
+    # fixed probe eval config
+    eval_cfg = getattr(config, "evaluation", None)
+    probe_enabled = bool(getattr(eval_cfg, "eval_probe_fixed", False))
+    probe_num_prompts = int(getattr(eval_cfg, "probe_num_prompts", 8))
+    probe_seeds = list(getattr(eval_cfg, "probe_seeds", [0, 1, 2, 3]))
+    probe_every = int(getattr(eval_cfg, "eval_probe_every", 2))
+
+    # build fixed probe sets: first probe_num_prompts val items per bucket
+    probe_items = {
+        b: ds.val_items[:probe_num_prompts]
+        for b, ds in datasets.items()
+        if b != "__pooled__"
+    }
+
     total_generated = 0
     t_start = time.time()
     best_avg_reward = -float("inf")
@@ -263,6 +278,36 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
                 "reward_mode": train_metrics_list[-1].get("reward_mode", grpo_reward_mode),
             })
 
+            # reward component breakdown: aggregate across all grad steps
+            if model is not None and hasattr(model, "_last_sample_details"):
+                _import_json = __import__("json")
+                comp_accum: dict = {}
+                hard_accum: list = []
+                uncertain_count = 0
+                total_details = 0
+                for detail in model._last_sample_details:
+                    total_details += 1
+                    hard_accum.append(detail.get("hard_reward", 0.0))
+                    if detail.get("has_uncertain", False):
+                        uncertain_count += 1
+                    for qt, sc in detail.get("component_scores", {}).items():
+                        comp_accum.setdefault(qt, []).append(sc)
+                if total_details > 0:
+                    component_log = {
+                        f"grpo_component_{qt}": sum(v) / len(v)
+                        for qt, v in comp_accum.items()
+                    }
+                    component_log["hard_target_on_train_images"] = sum(hard_accum) / len(hard_accum)
+                    component_log["uncertain_rate_train"] = uncertain_count / total_details
+                    logger.log_reward_components(step, bucket, component_log)
+                    if step % 4 == 0:
+                        comp_str = "  ".join(
+                            f"{k.replace('grpo_component_','')}={v:.3f}"
+                            for k, v in sorted(component_log.items())
+                            if k.startswith("grpo_component_")
+                        )
+                        print(f"  [components] {comp_str}  hard_train={component_log['hard_target_on_train_images']:.3f}")
+
         # 3. Evaluate selected bucket (always hard_target for clean signal)
         # For pooled_random, training bucket is __pooled__ (no val items);
         # rotate through real buckets round-robin for per-step eval logging.
@@ -282,14 +327,52 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
         )
         total_generated += bucket_summary["num_images"]
 
-        # 4. Update sampler
+        # 4. Fixed probe evaluation (hard_target, same prompts/seeds every time)
+        if probe_enabled and step % probe_every == 0:
+            _probe_bucket = eval_bucket if bucket == POOLED_BUCKET else bucket
+            _probe_val_items = probe_items.get(_probe_bucket, [])
+            if _probe_val_items and model is not None:
+                import statistics as _stats
+                probe_rewards = []
+                uncertain_count = 0
+                total_q = 0
+                for seed in probe_seeds:
+                    from adaptive_curriculum.train.evaluate_buckets import evaluate_bucket as _eval_bucket
+                    _probe_out = str(run_dir / "probe_evals" / f"step_{step:06d}" / _probe_bucket / f"seed_{seed}")
+                    _probe_summary = _eval_bucket(
+                        model=model,
+                        reward_model=reward_model,
+                        val_items=_probe_val_items,
+                        out_dir=_probe_out,
+                        num_samples_per_prompt=1,
+                        seed=seed,
+                        t5_cache=t5_cache,
+                        reward_mode="hard_target",
+                    )
+                    probe_rewards.extend(_probe_summary.get("reward_distribution", []))
+                    for r in _probe_summary.get("per_qtype_accuracy", {}).values():
+                        pass  # already aggregated
+                if probe_rewards:
+                    pmean = sum(probe_rewards) / len(probe_rewards)
+                    pse = (_stats.stdev(probe_rewards) / (len(probe_rewards) ** 0.5)) if len(probe_rewards) > 1 else 0.0
+                    probe_result = {
+                        "mean_reward": pmean,
+                        "se_reward": pse,
+                        "num_images": len(probe_rewards),
+                        "per_prompt_scores": probe_rewards,
+                        "uncertain_rate": 0.0,
+                    }
+                    logger.log_probe_eval(step, _probe_bucket, probe_result)
+                    print(f"  [probe] {_probe_bucket}  mean={pmean:.4f}  se={pse:.4f}  n={len(probe_rewards)}")
+
+        # 5. Update sampler
         reward_info = {
             "raw_reward": bucket_summary["mean_raw_reward"],
             "eval_summary": bucket_summary,
         }
         sampler.update(bucket, reward_info)
 
-        # 5. Log
+        # 6. Log
         ucb_scores = sampler.get_scores() if hasattr(sampler, "get_scores") else {}
         bucket_stats = sampler.get_stats_dict() if hasattr(sampler, "get_stats_dict") else {}
         logger.log_curriculum_decision(step, bucket, ucb_scores, bucket_stats)

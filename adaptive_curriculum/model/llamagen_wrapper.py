@@ -541,7 +541,6 @@ class LlamaGenWrapper:
                 soft_result = reward_model.score_image(pil_img, item, mode=reward_mode)
                 soft_score = soft_result["score"]
                 rewards[i, s] = soft_score
-                # compute hard score from same answers (no extra VLM call if possible)
                 hard_result = reward_model.score_image(pil_img, item, mode="hard_target")
                 self._last_sample_details.append({
                     "prompt_id": item.id,
@@ -551,10 +550,12 @@ class LlamaGenWrapper:
                     "soft_reward": float(soft_score),
                     "hard_reward": float(hard_result["score"]),
                     "has_uncertain": any(
-                        q.get("answer", "") == "uncertain"
+                        q.get("predicted", "") == "uncertain"
                         for q in soft_result.get("question_scores", [])
                     ),
                     "question_scores": soft_result.get("question_scores", []),
+                    "component_scores": soft_result.get("component_scores", {}),
+                    "hard_component_scores": hard_result.get("component_scores", {}),
                 })
 
         # 4. Group-relative advantages per prompt

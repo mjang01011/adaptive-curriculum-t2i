@@ -167,6 +167,34 @@ class RunLogger:
 
         self._wandb_run.log(wandb_log, step=step)
 
+    # ── fixed probe eval ─────────────────────────────────────────────────────
+
+    def log_probe_eval(self, step: int, bucket: str, probe_result: dict):
+        record = {"curriculum_step": step, "bucket": bucket, **{
+            k: v for k, v in probe_result.items()
+            if k not in ("per_prompt_scores",)
+        }, "per_prompt_scores": probe_result.get("per_prompt_scores", [])}
+        append_jsonl(str(self.run_dir / "probe_eval_history.jsonl"), record)
+        if self._wandb_run:
+            wandb_log = {
+                f"probe/{bucket}/mean_reward": probe_result.get("mean_reward", 0),
+                f"probe/{bucket}/se_reward": probe_result.get("se_reward", 0),
+                f"probe/{bucket}/uncertain_rate": probe_result.get("uncertain_rate", 0),
+            }
+            self._wandb_run.log(wandb_log, step=step)
+
+    # ── reward component logging ───────────────────────────────────────────────
+
+    def log_reward_components(self, step: int, bucket: str, components: dict):
+        record = {"curriculum_step": step, "bucket": bucket, **components}
+        append_jsonl(str(self.run_dir / "reward_components.jsonl"), record)
+        if self._wandb_run:
+            wandb_log = {}
+            for key, val in components.items():
+                if isinstance(val, (int, float)):
+                    wandb_log[f"reward_components/{bucket}/{key}"] = val
+            self._wandb_run.log(wandb_log, step=step)
+
     # ── GPU stats ─────────────────────────────────────────────────────────────
 
     def log_gpu_stats(self, step: int):

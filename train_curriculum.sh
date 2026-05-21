@@ -28,6 +28,7 @@ PRETRAINED=/viscam/u/jj277/svl/B3S/baselines/LlamaGen/pretrained_models
 
 EXPERIMENT=${EXPERIMENT:-pilot_fast}   # override with: EXPERIMENT=full_ucb sbatch train_curriculum.sh
 STRATEGY=${STRATEGY:-ucb}              # override with: STRATEGY=pooled_random or STRATEGY=round_robin
+RUN_NAME="${EXPERIMENT}_${STRATEGY}_${SLURM_JOB_ID}_$(date +%Y%m%d_%H%M%S)"
 
 cd $PROJECT
 export PYTHONPATH=$PROJECT:$LLAMAGEN:$PYTHONPATH
@@ -45,4 +46,5 @@ python -m adaptive_curriculum.train.run_experiment \
     --t5-path        $PRETRAINED/t5-ckpt \
     --t5-cache-dir   /viscam/u/jj277/adaptive-curriculum-t2i/data/t5_cache \
     --output-root    /viscam/u/jj277/adaptive-curriculum-t2i/outputs \
+    --run-name       $RUN_NAME \
     --wandb

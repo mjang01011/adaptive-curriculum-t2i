@@ -3,6 +3,7 @@
 # Anchored prompts give the model color grounding signals alongside spatial supervision,
 # which should reduce reward noise from object confusion.
 #
+# Anchored data baseline (hard_target) is ~0.58 (higher than old 0.344 — color cues help Qwen).
 # If spatial val reward trends upward over 30 steps → proceed to UCB comparisons.
 # If it flatlines or fluctuates → fix reward/GRPO before running curriculum comparisons.
 #

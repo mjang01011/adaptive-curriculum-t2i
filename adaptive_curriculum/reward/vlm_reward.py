@@ -120,6 +120,28 @@ def _pseudo_soft_score(predicted: str, expected: str) -> float:
     return 1.0 if predicted == expected else 0.0
 
 
+# Base unnormalized weights per question type for target-heavy mode.
+# Target questions (relation/attribute/count) get 6×; anti-target get 1.5×;
+# presence/support get 0.75×; quality/alignment get 0.5×.
+# Weights are normalized per-item so they always sum to 1.0.
+_TARGET_HEAVY_BASE_WEIGHTS = {
+    "relation":        6.0,
+    "attribute":       3.0,
+    "count":           6.0,
+    "anti_relation":   1.5,
+    "anti_swap":       0.75,
+    "anti_count":      1.5,
+    "object_presence": 0.75,
+    "image_quality":   0.5,
+    "prompt_alignment": 0.5,
+}
+_TARGET_HEAVY_DEFAULT_WEIGHT = 1.0
+
+
+def _target_heavy_weight(q_type: str) -> float:
+    return _TARGET_HEAVY_BASE_WEIGHTS.get(q_type, _TARGET_HEAVY_DEFAULT_WEIGHT)
+
+
 # ---------------------------------------------------------------------------
 # Reward model class
 # ---------------------------------------------------------------------------
@@ -275,11 +297,10 @@ class Qwen3VLRewardModel(RewardModel):
         return answers if answers is not None else ["uncertain"] * n
 
     def score_image(self, image, item, mode: str = "hard_target") -> dict:
-        # pseudo_soft_grpo uses grpo_reward_questions; all other modes use target_questions
-        if mode == "pseudo_soft_grpo":
+        # Select question set based on mode
+        if mode in ("pseudo_soft_grpo", "pseudo_soft_grpo_target_heavy"):
             questions = getattr(item, "grpo_reward_questions", []) or []
             if not questions:
-                # fall back to target_questions with uniform weights
                 questions = item.target_questions
         else:
             questions = item.target_questions
@@ -288,7 +309,6 @@ class Qwen3VLRewardModel(RewardModel):
         t0 = time.time()
 
         if mode == "true_soft":
-            # One call per question; extracts logit-based probability
             answers = []
             p_yes_list = []
             for q in questions:
@@ -296,7 +316,6 @@ class Qwen3VLRewardModel(RewardModel):
                 answers.append(ans)
                 p_yes_list.append(p_yes)
         else:
-            # One call per image for all questions (fast path)
             answers = self.answer_all_questions_once(image, questions)
             p_yes_list = [None] * n
 
@@ -306,42 +325,62 @@ class Qwen3VLRewardModel(RewardModel):
         self._total_questions_answered += n
         self._total_vlm_seconds += vlm_seconds
 
+        # Build per-question weights
+        if mode == "pseudo_soft_grpo_target_heavy":
+            raw_weights = [_target_heavy_weight(getattr(q, "q_type", "")) for q in questions]
+            total_raw = sum(raw_weights) or 1.0
+            effective_weights = [w / total_raw for w in raw_weights]
+        elif mode == "pseudo_soft_grpo":
+            data_weights = [getattr(q, "weight", 1.0) for q in questions]
+            total_data = sum(data_weights) or 1.0
+            effective_weights = [w / total_data for w in data_weights]
+        else:
+            effective_weights = [1.0 / n] * n if n > 0 else []
+
         question_scores = []
-        for pred, q, p_yes in zip(answers, questions, p_yes_list):
+        for pred, q, p_yes, eff_w in zip(answers, questions, p_yes_list, effective_weights):
             expected = q.answer.lower()
 
             if mode == "true_soft":
                 q_score = p_yes if expected == "yes" else (1.0 - p_yes)
                 correct = pred == expected
-            elif mode in ("pseudo_soft_target", "pseudo_soft_grpo"):
+            elif mode in ("pseudo_soft_target", "pseudo_soft_grpo", "pseudo_soft_grpo_target_heavy"):
                 q_score = _pseudo_soft_score(pred, expected)
                 correct = pred == expected
             else:  # hard_target
                 q_score = _hard_score(pred, expected)
                 correct = pred == expected
 
+            q_type = getattr(q, "q_type", "unknown")
             question_scores.append({
                 "question": q.question,
                 "expected": expected,
                 "predicted": pred,
                 "correct": correct,
                 "score": q_score,
-                "weight": getattr(q, "weight", 1.0),
-                "q_type": getattr(q, "q_type", "unknown"),
+                "weight": eff_w,
+                "q_type": q_type,
             })
 
-        if mode == "pseudo_soft_grpo" and question_scores:
-            total_weight = sum(qs["weight"] for qs in question_scores)
-            score = (
-                sum(qs["score"] * qs["weight"] for qs in question_scores) / total_weight
-                if total_weight > 0 else 0.0
-            )
-        else:
-            score = sum(qs["score"] for qs in question_scores) / n if n > 0 else 0.0
+        score = sum(qs["score"] * qs["weight"] for qs in question_scores) if question_scores else 0.0
+
+        # Component breakdown by q_type (for logging)
+        components: dict = {}
+        for qs in question_scores:
+            qt = qs["q_type"]
+            components.setdefault(qt, {"score_sum": 0.0, "weight_sum": 0.0, "count": 0})
+            components[qt]["score_sum"] += qs["score"] * qs["weight"]
+            components[qt]["weight_sum"] += qs["weight"]
+            components[qt]["count"] += 1
+        component_scores = {
+            qt: v["score_sum"] / v["weight_sum"] if v["weight_sum"] > 0 else 0.0
+            for qt, v in components.items()
+        }
 
         return {
             "score": float(score),
             "question_scores": question_scores,
+            "component_scores": component_scores,
             "mode": mode,
             "vlm_seconds": vlm_seconds,
             "num_questions": n,

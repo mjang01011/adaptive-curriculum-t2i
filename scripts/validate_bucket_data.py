@@ -108,12 +108,18 @@ def main():
         default=["attribute_binding", "counting", "spatial_relations_anchored", "complex_composition"],
         help="Buckets to validate",
     )
+    parser.add_argument("--expected-train-size", type=int, default=EXPECTED_TRAIN)
+    parser.add_argument("--expected-val-size", type=int, default=EXPECTED_VAL)
     args = parser.parse_args()
 
     data_root = Path(args.data_root)
     if not data_root.exists():
         print(f"[ERROR] data-root not found: {data_root}")
         sys.exit(1)
+
+    global EXPECTED_TRAIN, EXPECTED_VAL
+    EXPECTED_TRAIN = args.expected_train_size
+    EXPECTED_VAL = args.expected_val_size
 
     total_errors = 0
     for bucket in args.buckets:
