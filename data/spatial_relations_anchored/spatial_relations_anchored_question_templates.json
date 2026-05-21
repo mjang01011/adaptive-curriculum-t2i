@@ -1,6 +1,24 @@
 {
-  "bucket": "counting",
-  "description": "Grounded GRPO counting dataset. Hard target questions remain exact-count only; GRPO adds visibility and quality/alignment stabilizers.",
+  "bucket": "spatial_relations_anchored",
+  "description": "Anchored spatial dataset. Color/object anchors reduce ambiguity; hard target questions are spatial-only.",
+  "relations": {
+    "left_of": "to the left of",
+    "right_of": "to the right of",
+    "above": "above",
+    "below": "below",
+    "on_top_of": "on top of",
+    "under": "under",
+    "inside": "inside"
+  },
+  "inverse_relations": {
+    "left_of": "right_of",
+    "right_of": "left_of",
+    "above": "below",
+    "below": "above",
+    "on_top_of": "under",
+    "under": "on_top_of",
+    "inside": "outside_of"
+  },
   "target_reward_rule": {
     "type": "normalized_hard_target_accuracy",
     "formula": "correct_target_questions / 2",

@@ -1,0 +1,43 @@
+{
+  "bucket": "complex_composition",
+  "target_only": true,
+  "description": "Complex composition bucket intentionally combines multiple compositional constraints. Each prompt has one count, two attribute bindings, and one spatial relation. This is the only intentionally mixed-skill bucket.",
+  "target_question_count_per_prompt": 4,
+  "prompt_reward_rule": "correct_target_questions / 4",
+  "templates": [
+    {
+      "type": "count",
+      "template": "Are there exactly {count_word} {object_plural} in the image?",
+      "answer": "yes"
+    },
+    {
+      "type": "attribute",
+      "template": "Is the {counted_object} {attribute1}?",
+      "answer": "yes"
+    },
+    {
+      "type": "attribute",
+      "template": "Is the {reference_object} {attribute2}?",
+      "answer": "yes"
+    },
+    {
+      "type": "relation",
+      "template": "Is the {counted_object} {relation_phrase} the {reference_object}?",
+      "answer": "yes"
+    }
+  ],
+  "reward_rule": {
+    "type": "normalized_target_accuracy",
+    "formula": "correct_target_questions / 4",
+    "max_reward": 1.0,
+    "min_reward": 0.0,
+    "vlm_answer_space": [
+      "yes",
+      "no",
+      "uncertain"
+    ],
+    "uncertain_score": 0.0,
+    "note": "Use only target_questions for reward computation."
+  },
+  "non_overlap_note": "Pure buckets remain target-isolated; this bucket intentionally combines skills."
+}

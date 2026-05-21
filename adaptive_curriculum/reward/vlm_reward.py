@@ -7,7 +7,12 @@ reducing inference cost by 2-4× vs one call per question.
 Reward modes
 ------------
 hard_target        : correct yes/no = 1, incorrect or uncertain = 0  (UCB/eval signal)
-pseudo_soft_target : correct = 1, uncertain = 0.5, incorrect = 0     (GRPO signal)
+                     Uses item.target_questions only.
+pseudo_soft_target : correct = 1, uncertain = 0.5, incorrect = 0     (GRPO signal, legacy)
+                     Uses item.target_questions only.
+pseudo_soft_grpo   : weighted pseudo-soft scoring on item.grpo_reward_questions.
+                     score = sum(weight_i * pseudo_soft_i) / sum(weight_i)
+                     Falls back to pseudo_soft_target on target_questions if no grpo_reward_questions.
 true_soft          : score = P_vlm("yes") if expected="yes" else 1 - P_vlm("yes"),
                      derived from first-token logits — one call per question (slower)
 """
@@ -270,22 +275,29 @@ class Qwen3VLRewardModel(RewardModel):
         return answers if answers is not None else ["uncertain"] * n
 
     def score_image(self, image, item, mode: str = "hard_target") -> dict:
-        target_questions = item.target_questions
-        n = len(target_questions)
+        # pseudo_soft_grpo uses grpo_reward_questions; all other modes use target_questions
+        if mode == "pseudo_soft_grpo":
+            questions = getattr(item, "grpo_reward_questions", []) or []
+            if not questions:
+                # fall back to target_questions with uniform weights
+                questions = item.target_questions
+        else:
+            questions = item.target_questions
 
+        n = len(questions)
         t0 = time.time()
 
         if mode == "true_soft":
             # One call per question; extracts logit-based probability
             answers = []
             p_yes_list = []
-            for q in target_questions:
+            for q in questions:
                 ans, p_yes = self._ask_single_with_prob(image, q.question)
                 answers.append(ans)
                 p_yes_list.append(p_yes)
         else:
             # One call per image for all questions (fast path)
-            answers = self.answer_all_questions_once(image, target_questions)
+            answers = self.answer_all_questions_once(image, questions)
             p_yes_list = [None] * n
 
         vlm_seconds = time.time() - t0
@@ -295,13 +307,13 @@ class Qwen3VLRewardModel(RewardModel):
         self._total_vlm_seconds += vlm_seconds
 
         question_scores = []
-        for pred, q, p_yes in zip(answers, target_questions, p_yes_list):
+        for pred, q, p_yes in zip(answers, questions, p_yes_list):
             expected = q.answer.lower()
 
             if mode == "true_soft":
                 q_score = p_yes if expected == "yes" else (1.0 - p_yes)
                 correct = pred == expected
-            elif mode == "pseudo_soft_target":
+            elif mode in ("pseudo_soft_target", "pseudo_soft_grpo"):
                 q_score = _pseudo_soft_score(pred, expected)
                 correct = pred == expected
             else:  # hard_target
@@ -314,10 +326,19 @@ class Qwen3VLRewardModel(RewardModel):
                 "predicted": pred,
                 "correct": correct,
                 "score": q_score,
+                "weight": getattr(q, "weight", 1.0),
                 "q_type": getattr(q, "q_type", "unknown"),
             })
 
-        score = sum(qs["score"] for qs in question_scores) / n if n > 0 else 0.0
+        if mode == "pseudo_soft_grpo" and question_scores:
+            total_weight = sum(qs["weight"] for qs in question_scores)
+            score = (
+                sum(qs["score"] * qs["weight"] for qs in question_scores) / total_weight
+                if total_weight > 0 else 0.0
+            )
+        else:
+            score = sum(qs["score"] for qs in question_scores) / n if n > 0 else 0.0
+
         return {
             "score": float(score),
             "question_scores": question_scores,

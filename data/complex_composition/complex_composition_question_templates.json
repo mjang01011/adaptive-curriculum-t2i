@@ -1,33 +1,8 @@
 {
   "bucket": "complex_composition",
-  "target_only": true,
-  "description": "Complex composition bucket intentionally combines multiple compositional constraints. Each prompt has one count, two attribute bindings, and one spatial relation. This is the only intentionally mixed-skill bucket.",
-  "target_question_count_per_prompt": 4,
-  "prompt_reward_rule": "correct_target_questions / 4",
-  "templates": [
-    {
-      "type": "count",
-      "template": "Are there exactly {count_word} {object_plural} in the image?",
-      "answer": "yes"
-    },
-    {
-      "type": "attribute",
-      "template": "Is the {counted_object} {attribute1}?",
-      "answer": "yes"
-    },
-    {
-      "type": "attribute",
-      "template": "Is the {reference_object} {attribute2}?",
-      "answer": "yes"
-    },
-    {
-      "type": "relation",
-      "template": "Is the {counted_object} {relation_phrase} the {reference_object}?",
-      "answer": "yes"
-    }
-  ],
-  "reward_rule": {
-    "type": "normalized_target_accuracy",
+  "description": "Grounded complex composition dataset. Hard eval checks count, attributes, relation; GRPO adds visibility/quality stabilizers.",
+  "target_reward_rule": {
+    "type": "normalized_hard_target_accuracy",
     "formula": "correct_target_questions / 4",
     "max_reward": 1.0,
     "min_reward": 0.0,
@@ -37,7 +12,38 @@
       "uncertain"
     ],
     "uncertain_score": 0.0,
-    "note": "Use only target_questions for reward computation."
+    "used_for": [
+      "validation",
+      "ucb",
+      "final_eval"
+    ],
+    "note": "Use only target_questions for hard evaluation and UCB updates."
   },
-  "non_overlap_note": "Pure buckets remain target-isolated; this bucket intentionally combines skills."
+  "grpo_reward_rule": {
+    "type": "weighted_pseudo_soft_accuracy",
+    "formula": "sum(weight_i * pseudo_soft_correctness_i) / sum(weight_i)",
+    "max_reward": 1.0,
+    "min_reward": 0.0,
+    "vlm_answer_space": [
+      "yes",
+      "no",
+      "uncertain"
+    ],
+    "pseudo_soft_scoring": {
+      "expected_yes": {
+        "yes": 1.0,
+        "uncertain": 0.5,
+        "no": 0.0
+      },
+      "expected_no": {
+        "no": 1.0,
+        "uncertain": 0.5,
+        "yes": 0.0
+      }
+    },
+    "used_for": [
+      "grpo_training"
+    ],
+    "note": "Use grpo_reward_questions for GRPO training only. Do not use support/quality questions for UCB or final hard evaluation."
+  }
 }
