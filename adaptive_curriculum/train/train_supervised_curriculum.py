@@ -225,6 +225,49 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
         if b != "__pooled__"
     }
 
+    # base fixed probe (step=-1) — run once before any GRPO updates
+    if probe_enabled and model is not None:
+        import statistics as _stats
+        for _pb_bucket, _pb_items in probe_items.items():
+            if not _pb_items:
+                continue
+            _pb_rewards = []
+            _pb_qtype_accum: dict = {}
+            _pb_uncertain = 0
+            _pb_total_q = 0
+            for seed in probe_seeds:
+                _pb_out = str(run_dir / "probe_evals" / "step_base" / _pb_bucket / f"seed_{seed}")
+                from adaptive_curriculum.train.evaluate_buckets import evaluate_bucket as _eval_bucket
+                _pb_summary = _eval_bucket(
+                    model=model,
+                    reward_model=reward_model,
+                    val_items=_pb_items,
+                    out_dir=_pb_out,
+                    num_samples_per_prompt=1,
+                    seed=seed,
+                    t5_cache=t5_cache,
+                    reward_mode="hard_target",
+                )
+                _pb_rewards.extend(_pb_summary.get("reward_distribution", []))
+                for qt, acc in _pb_summary.get("per_qtype_accuracy", {}).items():
+                    _pb_qtype_accum.setdefault(qt, []).append(acc)
+                _pb_uncertain += _pb_summary.get("uncertain_rate", 0.0)
+            if _pb_rewards:
+                pmean = sum(_pb_rewards) / len(_pb_rewards)
+                pse = (_stats.stdev(_pb_rewards) / len(_pb_rewards) ** 0.5) if len(_pb_rewards) > 1 else 0.0
+                _pb_qtype_means = {qt: sum(v) / len(v) for qt, v in _pb_qtype_accum.items()}
+                probe_result = {
+                    "mean_reward": pmean,
+                    "se_reward": pse,
+                    "num_images": len(_pb_rewards),
+                    "per_prompt_scores": _pb_rewards,
+                    "uncertain_rate": _pb_uncertain / len(probe_seeds) if probe_seeds else 0.0,
+                    "per_qtype_accuracy": _pb_qtype_means,
+                }
+                logger.log_probe_eval(-1, _pb_bucket, probe_result)
+                qtype_str = "  ".join(f"{qt}={v:.3f}" for qt, v in sorted(_pb_qtype_means.items()))
+                print(f"  [probe base] {_pb_bucket}  mean={pmean:.4f}  se={pse:.4f}  n={len(_pb_rewards)}  {qtype_str}")
+
     total_generated = 0
     t_start = time.time()
     best_avg_reward = -float("inf")
@@ -329,13 +372,12 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
                     component_log["hard_target_on_train_images"] = sum(hard_accum) / len(hard_accum)
                     component_log["uncertain_rate_train"] = uncertain_count / total_details
                     logger.log_reward_components(step, bucket, component_log)
-                    if step % 4 == 0:
-                        comp_str = "  ".join(
-                            f"{k.replace('grpo_component_','')}={v:.3f}"
-                            for k, v in sorted(component_log.items())
-                            if k.startswith("grpo_component_")
-                        )
-                        print(f"  [components] {comp_str}  hard_train={component_log['hard_target_on_train_images']:.3f}")
+                    comp_str = "  ".join(
+                        f"{k.replace('grpo_component_','')}={v:.3f}"
+                        for k, v in sorted(component_log.items())
+                        if k.startswith("grpo_component_")
+                    )
+                    print(f"  [components] {comp_str}  hard_train={component_log['hard_target_on_train_images']:.3f}")
 
         # 3. Evaluate selected bucket (always hard_target for clean signal)
         # For pooled_random, training bucket is __pooled__ (no val items);
@@ -363,8 +405,8 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
             if _probe_val_items and model is not None:
                 import statistics as _stats
                 probe_rewards = []
-                uncertain_count = 0
-                total_q = 0
+                _probe_qtype_accum: dict = {}
+                _probe_uncertain_sum = 0.0
                 for seed in probe_seeds:
                     from adaptive_curriculum.train.evaluate_buckets import evaluate_bucket as _eval_bucket
                     _probe_out = str(run_dir / "probe_evals" / f"step_{step:06d}" / _probe_bucket / f"seed_{seed}")
@@ -379,20 +421,24 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
                         reward_mode="hard_target",
                     )
                     probe_rewards.extend(_probe_summary.get("reward_distribution", []))
-                    for r in _probe_summary.get("per_qtype_accuracy", {}).values():
-                        pass  # already aggregated
+                    for qt, acc in _probe_summary.get("per_qtype_accuracy", {}).items():
+                        _probe_qtype_accum.setdefault(qt, []).append(acc)
+                    _probe_uncertain_sum += _probe_summary.get("uncertain_rate", 0.0)
                 if probe_rewards:
                     pmean = sum(probe_rewards) / len(probe_rewards)
-                    pse = (_stats.stdev(probe_rewards) / (len(probe_rewards) ** 0.5)) if len(probe_rewards) > 1 else 0.0
+                    pse = (_stats.stdev(probe_rewards) / len(probe_rewards) ** 0.5) if len(probe_rewards) > 1 else 0.0
+                    _probe_qtype_means = {qt: sum(v) / len(v) for qt, v in _probe_qtype_accum.items()}
                     probe_result = {
                         "mean_reward": pmean,
                         "se_reward": pse,
                         "num_images": len(probe_rewards),
                         "per_prompt_scores": probe_rewards,
-                        "uncertain_rate": 0.0,
+                        "uncertain_rate": _probe_uncertain_sum / len(probe_seeds) if probe_seeds else 0.0,
+                        "per_qtype_accuracy": _probe_qtype_means,
                     }
                     logger.log_probe_eval(step, _probe_bucket, probe_result)
-                    print(f"  [probe] {_probe_bucket}  mean={pmean:.4f}  se={pse:.4f}  n={len(probe_rewards)}")
+                    qtype_str = "  ".join(f"{qt}={v:.3f}" for qt, v in sorted(_probe_qtype_means.items()))
+                    print(f"  [probe step={step}] {_probe_bucket}  mean={pmean:.4f}  se={pse:.4f}  n={len(probe_rewards)}  {qtype_str}")
 
         # 5. Update sampler
         reward_info = {

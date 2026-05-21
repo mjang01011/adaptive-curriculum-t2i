@@ -181,6 +181,8 @@ class RunLogger:
                 f"probe/{bucket}/se_reward": probe_result.get("se_reward", 0),
                 f"probe/{bucket}/uncertain_rate": probe_result.get("uncertain_rate", 0),
             }
+            for qt, acc in probe_result.get("per_qtype_accuracy", {}).items():
+                wandb_log[f"probe/{bucket}/{qt}"] = acc
             self._wandb_run.log(wandb_log, step=step)
 
     # ── reward component logging ───────────────────────────────────────────────

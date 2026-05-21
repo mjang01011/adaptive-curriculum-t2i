@@ -112,6 +112,14 @@ def evaluate_bucket(
     per_q_accuracy = {q: sum(v) / len(v) for q, v in per_question_correct.items()}
     per_qtype_accuracy = {qt: sum(v) / len(v) for qt, v in per_qtype_correct.items()}
 
+    total_q = sum(len(r["question_scores"]) for r in rewards_records)
+    uncertain_q = sum(
+        1 for r in rewards_records
+        for qs in r["question_scores"]
+        if qs.get("predicted", "") == "uncertain"
+    )
+    uncertain_rate = uncertain_q / total_q if total_q else 0.0
+
     summary = {
         "bucket": bucket_name,
         "mean_raw_reward": mean_reward,
@@ -120,6 +128,7 @@ def evaluate_bucket(
         "num_images": len(rewards_records),
         "per_question_accuracy": per_q_accuracy,
         "per_qtype_accuracy": per_qtype_accuracy,
+        "uncertain_rate": uncertain_rate,
         "sample_image_paths": sample_image_paths,
         "reward_distribution": prompt_rewards,
     }
