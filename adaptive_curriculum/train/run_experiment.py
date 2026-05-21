@@ -13,6 +13,7 @@ def parse_args():
                         choices=["uniform", "static", "ucb", "fixed_bucket", "round_robin", "pooled_random"],
                         default="ucb")
     parser.add_argument("--output-root", type=str, default=None)
+    parser.add_argument("--output-dir", type=str, default=None, help="Exact output directory (overrides output-root + run naming)")
     parser.add_argument("--data-root", type=str, default=None)
     parser.add_argument("--pretrained-root", type=str, default=None)
     parser.add_argument("--repo-root", type=str, default=None, help="Path to LlamaGen repo root")
@@ -76,7 +77,12 @@ def main():
         raise FileNotFoundError(f"data_root not found: {data_root}")
 
     from adaptive_curriculum.train.train_supervised_curriculum import run_curriculum_training
-    run_dir = run_curriculum_training(config, strategy=args.strategy)
+    run_dir = run_curriculum_training(
+        config,
+        strategy=args.strategy,
+        output_root=args.output_root,
+        output_dir=args.output_dir,
+    )
     print(f"[run_experiment] Finished. Results at: {run_dir}")
 
 

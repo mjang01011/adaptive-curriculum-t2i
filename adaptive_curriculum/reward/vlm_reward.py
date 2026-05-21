@@ -6,15 +6,22 @@ reducing inference cost by 2-4× vs one call per question.
 
 Reward modes
 ------------
-hard_target        : correct yes/no = 1, incorrect or uncertain = 0  (UCB/eval signal)
-                     Uses item.target_questions only.
-pseudo_soft_target : correct = 1, uncertain = 0.5, incorrect = 0     (GRPO signal, legacy)
-                     Uses item.target_questions only.
-pseudo_soft_grpo   : weighted pseudo-soft scoring on item.grpo_reward_questions.
-                     score = sum(weight_i * pseudo_soft_i) / sum(weight_i)
-                     Falls back to pseudo_soft_target on target_questions if no grpo_reward_questions.
-true_soft          : score = P_vlm("yes") if expected="yes" else 1 - P_vlm("yes"),
-                     derived from first-token logits — one call per question (slower)
+hard_target                   : correct yes/no = 1, incorrect or uncertain = 0  (UCB/eval signal)
+                                 Uses item.target_questions only.
+pseudo_soft_target             : correct = 1, uncertain = 0.5, incorrect = 0     (GRPO signal, legacy)
+                                 Uses item.target_questions only.
+pseudo_soft_grpo               : weighted pseudo-soft scoring on item.grpo_reward_questions.
+                                 score = sum(weight_i * pseudo_soft_i) / sum(weight_i)
+                                 Falls back to pseudo_soft_target on target_questions if no grpo_reward_questions.
+pseudo_soft_grpo_target_heavy  : same as pseudo_soft_grpo but overrides per-question weights using
+                                 _TARGET_HEAVY_BASE_WEIGHTS (relation/count=6×, attribute=3×, etc.)
+true_soft                      : score = P_vlm("yes") if expected="yes" else 1 - P_vlm("yes"),
+                                 derived from first-token logits — one call per question (slower)
+qwen_logit_grpo_target_heavy   : logit-based continuous score on item.grpo_reward_questions with
+                                 target-heavy weighting. One VLM call per question (like true_soft).
+                                 score_i = p_yes/(p_yes+p_no) if expected="yes" else p_no/(p_yes+p_no)
+                                 Uses same _TARGET_HEAVY_BASE_WEIGHTS as pseudo_soft_grpo_target_heavy.
+                                 Slower but denser signal than pseudo-soft modes.
 """
 import json
 import math
@@ -298,7 +305,7 @@ class Qwen3VLRewardModel(RewardModel):
 
     def score_image(self, image, item, mode: str = "hard_target") -> dict:
         # Select question set based on mode
-        if mode in ("pseudo_soft_grpo", "pseudo_soft_grpo_target_heavy"):
+        if mode in ("pseudo_soft_grpo", "pseudo_soft_grpo_target_heavy", "qwen_logit_grpo_target_heavy"):
             questions = getattr(item, "grpo_reward_questions", []) or []
             if not questions:
                 questions = item.target_questions
@@ -308,11 +315,12 @@ class Qwen3VLRewardModel(RewardModel):
         n = len(questions)
         t0 = time.time()
 
-        if mode == "true_soft":
+        if mode in ("true_soft", "qwen_logit_grpo_target_heavy"):
             answers = []
             p_yes_list = []
             for q in questions:
-                ans, p_yes = self._ask_single_with_prob(image, q.question)
+                text = q.question if hasattr(q, "question") else q["question"]
+                ans, p_yes = self._ask_single_with_prob(image, text)
                 answers.append(ans)
                 p_yes_list.append(p_yes)
         else:
@@ -320,13 +328,13 @@ class Qwen3VLRewardModel(RewardModel):
             p_yes_list = [None] * n
 
         vlm_seconds = time.time() - t0
-        vlm_calls = n if mode == "true_soft" else 1
+        vlm_calls = n if mode in ("true_soft", "qwen_logit_grpo_target_heavy") else 1
         self._total_vlm_calls += vlm_calls
         self._total_questions_answered += n
         self._total_vlm_seconds += vlm_seconds
 
         # Build per-question weights
-        if mode == "pseudo_soft_grpo_target_heavy":
+        if mode in ("pseudo_soft_grpo_target_heavy", "qwen_logit_grpo_target_heavy"):
             raw_weights = [_target_heavy_weight(getattr(q, "q_type", "")) for q in questions]
             total_raw = sum(raw_weights) or 1.0
             effective_weights = [w / total_raw for w in raw_weights]
@@ -341,7 +349,7 @@ class Qwen3VLRewardModel(RewardModel):
         for pred, q, p_yes, eff_w in zip(answers, questions, p_yes_list, effective_weights):
             expected = q.answer.lower()
 
-            if mode == "true_soft":
+            if mode in ("true_soft", "qwen_logit_grpo_target_heavy"):
                 q_score = p_yes if expected == "yes" else (1.0 - p_yes)
                 correct = pred == expected
             elif mode in ("pseudo_soft_target", "pseudo_soft_grpo", "pseudo_soft_grpo_target_heavy"):

@@ -50,13 +50,42 @@ def build_sampler(strategy: str, bucket_names: list, config):
         raise ValueError(f"Unknown strategy: {strategy}")
 
 
-def run_curriculum_training(config, strategy: str, output_root: Optional[str] = None) -> str:
+def run_curriculum_training(config, strategy: str, output_root: Optional[str] = None, output_dir: Optional[str] = None) -> str:
+    import os, subprocess
     set_seed(config.seed)
 
-    output_root = output_root or config.paths.output_root
-    experiment_name = getattr(getattr(config, "logging", None), "run_name", None)
-    run_dir = make_run_dir(output_root, strategy, config.project_name, experiment_name=experiment_name)
+    if output_dir is not None:
+        run_dir = Path(output_dir)
+        if run_dir.exists():
+            raise RuntimeError(f"Refusing to overwrite existing output_dir: {run_dir}")
+        run_dir.mkdir(parents=True, exist_ok=False)
+        for sub in ("checkpoints", "evals", "generations", "plots", "probe_evals"):
+            (run_dir / sub).mkdir(exist_ok=True)
+    else:
+        output_root = output_root or config.paths.output_root
+        experiment_name = getattr(getattr(config, "logging", None), "run_name", None)
+        run_dir = make_run_dir(output_root, strategy, config.project_name, experiment_name=experiment_name)
     print(f"[train] Run dir: {run_dir}")
+
+    # save run metadata
+    try:
+        git_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:
+        git_commit = "unknown"
+    run_name = getattr(getattr(config, "logging", None), "run_name", run_dir.name)
+    fixed_bucket = getattr(config, "fixed_bucket", None)
+    metadata = {
+        "experiment": os.environ.get("EXPERIMENT", run_name),
+        "strategy": strategy,
+        "slurm_job_id": os.environ.get("SLURM_JOB_ID", "local"),
+        "run_name": run_name,
+        "output_dir": str(run_dir),
+        "git_commit": git_commit,
+        "data_root": str(getattr(config.paths, "data_root", "data")),
+        "bucket": fixed_bucket,
+    }
+    write_json(str(run_dir / "run_metadata.json"), metadata)
+    print(f"[train] Metadata: experiment={metadata['experiment']}  job={metadata['slurm_job_id']}  bucket={fixed_bucket}")
 
     # save resolved config
     import yaml, dataclasses
