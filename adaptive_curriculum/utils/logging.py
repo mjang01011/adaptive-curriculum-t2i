@@ -183,7 +183,10 @@ class RunLogger:
             }
             for qt, acc in probe_result.get("per_qtype_accuracy", {}).items():
                 wandb_log[f"probe/{bucket}/{qt}"] = acc
-            self._wandb_run.log(wandb_log, step=step)
+            # W&B requires step >= 0; base probe (step=-1) logged at step 0 with probe_base/ prefix
+            if step < 0:
+                wandb_log = {k.replace("probe/", "probe_base/"): v for k, v in wandb_log.items()}
+            self._wandb_run.log(wandb_log, step=max(step, 0))
 
     # ── reward component logging ───────────────────────────────────────────────
 
