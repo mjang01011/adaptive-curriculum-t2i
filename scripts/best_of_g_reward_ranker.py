@@ -246,8 +246,8 @@ def main():
             if model is not None:
                 img_paths = model.generate_images(
                     prompts=[item.text],
-                    out_dir=str(samples_dir),
-                    prompt_ids=[f"{item.id}_s{k}"],
+                    out_dir=str(samples_dir / f"seed_{k}"),
+                    prompt_ids=[item.id],
                     bucket_names=[item.bucket],
                     num_samples_per_prompt=1,
                     seed=seed,
