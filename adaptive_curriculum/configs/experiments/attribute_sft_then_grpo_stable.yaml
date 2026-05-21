@@ -1,0 +1,61 @@
+# Short stable GRPO starting from rejection-SFT LoRA checkpoint.
+# Only run if rejection-SFT improves the fixed probe (or at least does not hurt).
+# lr=1e-5 and beta=0.1 are conservative: SFT already moved the policy, we don't
+# want to destroy the improvement — just refine it.
+#
+# Before running: set init_lora_checkpoint to the SFT best.pt path.
+#
+# Usage:
+#   EXPERIMENT=attribute_sft_then_grpo_stable STRATEGY=fixed_bucket sbatch train_curriculum.sh
+
+fixed_bucket: attribute_binding
+
+# Path to SFT best checkpoint — update this before running.
+# Example: outputs/attribute_rejection_sft_top1_<job_id>/checkpoints/best.pt
+init_lora_checkpoint: null   # REPLACE with actual path
+
+training:
+  num_curriculum_steps: 10
+  gradient_steps_per_curriculum_step: 4
+  train_batch_size: 4
+  learning_rate: 1.0e-5
+  max_grad_norm: 1.0
+  save_checkpoints: true
+  save_every: 5
+
+grpo:
+  num_samples: 6
+  beta: 0.1
+  cfg_scale_train: 2.0
+  reward_mode: pseudo_soft_grpo_target_heavy
+  logprob_reduction: sum_sqrt_len
+  advantage_eps: 1.0e-4
+
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.0
+  start_layer: 0
+  target_modules: [wqkv, wo]
+
+evaluation:
+  cfg_scale: 2.0
+  full_eval_every_curriculum_step: 5
+  num_val_prompts_per_bucket: 20
+  num_samples_per_prompt: 4
+  reward_mode: hard_target
+  eval_probe_fixed: true
+  probe_num_prompts: 8
+  probe_seeds: [0, 1, 2, 3]
+  eval_probe_every: 2
+
+early_stop:
+  enabled: true
+  min_delta_from_base: -0.05
+  patience_probes: 2
+  kl_threshold: 5.0
+  presence_drop_threshold: 0.15
+
+ucb:
+  c: 0.25
+  epsilon: 0.1

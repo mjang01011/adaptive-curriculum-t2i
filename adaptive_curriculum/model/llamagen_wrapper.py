@@ -268,6 +268,143 @@ class LlamaGenWrapper:
         c_indices = padded * masks[:, :, None]
         return c_indices, masks
 
+    def generate_with_tokens(
+        self,
+        prompts: List[str],
+        out_dir: str,
+        prompt_ids: Optional[List[str]] = None,
+        bucket_names: Optional[List[str]] = None,
+        num_samples_per_prompt: int = 1,
+        seed: Optional[int] = None,
+        cached_embeddings: Optional[Dict[str, torch.Tensor]] = None,
+    ):
+        """
+        Same as generate_images but also returns raw VQ token tensors.
+        Returns (image_paths, token_tensors) where token_tensors[i] is shape (seq_len,)
+        and corresponds 1-to-1 with image_paths[i].
+        """
+        from torchvision.utils import save_image
+        from autoregressive.models.generate import generate
+
+        if seed is not None:
+            torch.manual_seed(seed)
+
+        out_path = Path(out_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+
+        prompt_ids = prompt_ids or [f"prompt_{i:06d}" for i in range(len(prompts))]
+        bucket_names = bucket_names or ["unknown"] * len(prompts)
+
+        self.gpt.eval()
+        image_paths: List[str] = []
+        token_tensors: List[torch.Tensor] = []
+
+        with torch.no_grad():
+            if cached_embeddings is not None:
+                c_indices, c_emb_masks = self._pack_cached_embeddings(
+                    prompt_ids, cached_embeddings
+                )
+            else:
+                caption_embs, emb_masks = self.t5.get_text_embeddings(prompts)
+                new_caption_embs = []
+                for emb, mask in zip(caption_embs, emb_masks):
+                    valid = int(mask.sum().item())
+                    new_caption_embs.append(torch.cat([emb[valid:], emb[:valid]]))
+                new_caption_embs = torch.stack(new_caption_embs)
+                new_emb_masks = torch.flip(emb_masks, dims=[-1])
+                c_indices = new_caption_embs * new_emb_masks[:, :, None]
+                c_emb_masks = new_emb_masks
+
+            for k in range(num_samples_per_prompt):
+                qzshape = [len(c_indices), self.codebook_embed_dim, self.latent_size, self.latent_size]
+                index_sample = generate(
+                    self.gpt, c_indices, self.latent_size ** 2,
+                    c_emb_masks,
+                    cfg_scale=self.cfg_scale,
+                    temperature=self.temperature,
+                    top_k=self.top_k,
+                    top_p=self.top_p,
+                    sample_logits=True,
+                )  # (B, seq_len)
+                samples = self.vq_model.decode_code(index_sample, qzshape)
+
+                for i, (pid, bucket) in enumerate(zip(prompt_ids, bucket_names)):
+                    fname = f"{bucket}_{pid}_sample{k}.png"
+                    img_path = str(out_path / fname)
+                    save_image(samples[i:i+1], img_path, normalize=True, value_range=(-1, 1))
+                    image_paths.append(img_path)
+                    token_tensors.append(index_sample[i].cpu())  # (seq_len,)
+
+        return image_paths, token_tensors
+
+    def train_sft_step_from_tokens(
+        self,
+        image_tokens: torch.Tensor,           # (B, seq_len) int64
+        prompt_ids: List[str],
+        t5_cache_dict: Dict[str, torch.Tensor],
+    ) -> dict:
+        """
+        SFT step on pre-computed VQ token sequences with cached T5 conditioning.
+        Uses the same AR cross-entropy objective as train_supervised_step but skips
+        VQ re-encoding (tokens already saved from generation) and T5 inference.
+        """
+        import torch.nn.functional as F
+
+        targets = image_tokens.long().to(self.device)
+        c_indices, c_emb_masks = self._pack_cached_embeddings(prompt_ids, t5_cache_dict)
+
+        self.gpt.train()
+        # disable conditioning dropout for clean gradients (same pattern as _compute_log_probs)
+        saved_uncond_prob = self.gpt.cls_embedding.uncond_prob
+        self.gpt.cls_embedding.uncond_prob = 0.0
+
+        self._optimizer.zero_grad()
+
+        use_amp = self.precision in ("bf16", "fp16")
+        amp_dtype = self.dtype if use_amp else None
+
+        try:
+            with autocast("cuda", dtype=amp_dtype, enabled=use_amp):
+                logits, _ = self.gpt(
+                    idx=targets[:, :-1],
+                    cond_idx=c_indices,
+                    input_pos=None,
+                    targets=targets,
+                    mask=None,
+                    valid=None,
+                )
+                loss = F.cross_entropy(
+                    logits.reshape(-1, logits.shape[-1]),
+                    targets.reshape(-1),
+                )
+        finally:
+            self.gpt.cls_embedding.uncond_prob = saved_uncond_prob
+
+        if self._scaler is not None:
+            self._scaler.scale(loss).backward()
+            self._scaler.unscale_(self._optimizer)
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                [p for p in self.gpt.parameters() if p.requires_grad],
+                self.max_grad_norm,
+            ).item()
+            self._scaler.step(self._optimizer)
+            self._scaler.update()
+        else:
+            loss.backward()
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                [p for p in self.gpt.parameters() if p.requires_grad],
+                self.max_grad_norm,
+            ).item()
+            self._optimizer.step()
+
+        self._step += 1
+        return {
+            "loss": loss.item(),
+            "lr": self._optimizer.param_groups[0]["lr"],
+            "grad_norm": grad_norm,
+            "step": self._step,
+        }
+
     def train_supervised_step(self, batch: list) -> dict:
         """
         Fine-tune on image-caption pairs using AR next-token prediction loss.

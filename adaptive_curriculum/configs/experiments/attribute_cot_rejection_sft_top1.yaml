@@ -1,0 +1,39 @@
+# CoT-prompt rejection-SFT on attribute_binding.
+# Generated images use structured prompts; model is trained with raw-prompt conditioning.
+# This distills structured-prompt benefits into the base model's raw-prompt behavior.
+#
+# Usage:
+#   EXPERIMENT=attribute_cot_rejection_sft_top1 \
+#   SELECTED_JSONL=outputs_cot_planning/cot_rejection_sft/<run>/selected_top1.jsonl \
+#   sbatch train_rejection_sft.sh
+
+mode: rejection_sft
+bucket: attribute_binding
+
+# generation_condition: structured_prompt  (recorded in samples.jsonl, informational)
+# sft_condition: raw_prompt               (T5 cache lookup uses original prompt_id)
+
+training:
+  epochs: 3
+  train_batch_size: 4
+  learning_rate: 2.0e-5
+  max_grad_norm: 1.0
+  save_every_epoch: true
+
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.0
+  start_layer: 0
+  target_modules: [wqkv, wo]
+
+evaluation:
+  reward_mode: hard_target
+  eval_probe_fixed: true
+  probe_num_prompts: 8
+  probe_seeds: [0, 1, 2, 3]
+  eval_probe_every_epoch: true
+  full_eval_every_epoch: true
+  num_val_prompts_per_bucket: 20
+  num_samples_per_prompt: 4
+  cfg_scale: 2.0

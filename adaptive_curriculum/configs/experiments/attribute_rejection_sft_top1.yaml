@@ -1,0 +1,36 @@
+# Rejection-SFT warm start on attribute_binding.
+# Trains LoRA with AR cross-entropy on top-1 reward-selected samples per prompt.
+# Lr=2e-5 matches the stable GRPO runs; 3 epochs with probe eval after each.
+#
+# Usage:
+#   EXPERIMENT=attribute_rejection_sft_top1 \
+#   SELECTED_JSONL=outputs/rejection_sft_attribute_binding_g6/selected_top1.jsonl \
+#   sbatch train_rejection_sft.sh
+
+mode: rejection_sft
+bucket: attribute_binding
+
+training:
+  epochs: 3
+  train_batch_size: 4
+  learning_rate: 2.0e-5
+  max_grad_norm: 1.0
+  save_every_epoch: true
+
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.0
+  start_layer: 0
+  target_modules: [wqkv, wo]
+
+evaluation:
+  reward_mode: hard_target
+  eval_probe_fixed: true
+  probe_num_prompts: 8
+  probe_seeds: [0, 1, 2, 3]
+  eval_probe_every_epoch: true
+  full_eval_every_epoch: true
+  num_val_prompts_per_bucket: 20
+  num_samples_per_prompt: 4
+  cfg_scale: 2.0

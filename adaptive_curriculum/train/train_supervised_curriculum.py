@@ -180,6 +180,12 @@ def run_curriculum_training(config, strategy: str, output_root: Optional[str] = 
             max_grad_norm=config.training.max_grad_norm,
         )
 
+    # optionally warm-start LoRA from a prior checkpoint (e.g. rejection-SFT best.pt)
+    init_ckpt = getattr(config, "init_lora_checkpoint", None)
+    if init_ckpt and str(init_ckpt) != "null" and model is not None:
+        model.load_checkpoint(str(init_ckpt))
+        print(f"[train] Loaded init LoRA checkpoint: {init_ckpt}")
+
     # for pooled_random: add a merged dataset entry so the loop can sample from it
     from adaptive_curriculum.curriculum.pooled_random_sampler import POOLED_BUCKET
     if strategy == "pooled_random":
