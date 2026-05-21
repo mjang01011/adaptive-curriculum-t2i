@@ -42,7 +42,7 @@ export PYTHONPATH=$PROJECT:$LLAMAGEN:$PYTHONPATH
 
 mkdir -p /viscam/u/jj277/adaptive-curriculum-t2i/logs
 
-/viscam/u/jj277/svl/bin/python scripts/best_of_g_reward_ranker.py \
+python3 scripts/best_of_g_reward_ranker.py \
     --bucket        $BUCKET \
     --data-root     ${PROJECT}/data \
     --repo-root     $LLAMAGEN \

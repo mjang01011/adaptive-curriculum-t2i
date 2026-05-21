@@ -31,7 +31,7 @@ mkdir -p /viscam/u/jj277/adaptive-curriculum-t2i/logs
 
 echo "[extract_t5] Extracting T5 embeddings for buckets: ${BUCKETS}"
 
-/viscam/u/jj277/svl/bin/python -m adaptive_curriculum.data.extract_t5_embeddings \
+python3 -m adaptive_curriculum.data.extract_t5_embeddings \
     --data-root  ${PROJECT}/data \
     --out-dir    ${PROJECT}/data/t5_cache \
     --repo-root  $LLAMAGEN \
