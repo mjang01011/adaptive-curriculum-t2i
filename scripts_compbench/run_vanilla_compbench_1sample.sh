@@ -18,6 +18,7 @@ export HF_HOME=/viscam/u/jj277/.hf_cache
 export TOKENIZERS_PARALLELISM=false
 
 source /viscam/u/jj277/svl/bin/activate
+PYTHON=/viscam/u/jj277/svl/bin/python3
 
 PROJECT=/viscam/u/jj277/adaptive-curriculum-t2i
 LLAMAGEN=/viscam/u/jj277/adaptive-curriculum-t2i/LlamaGen
@@ -72,7 +73,7 @@ for CAT in "${CATEGORIES[@]}"; do
         LORA_ARG="--lora-checkpoint ${PROJECT}/${LORA_CKPT}"
     fi
 
-    python3 ${PROJECT}/scripts_compbench/generate_llamagen_compbench_1sample.py \
+    $PYTHON ${PROJECT}/scripts_compbench/generate_llamagen_compbench_1sample.py \
         --prompt-file   "${PROMPT_FILES[$CAT]}" \
         --category      "$CAT" \
         --repo-root     "$LLAMAGEN" \
@@ -99,25 +100,25 @@ for CAT in "${CATEGORIES[@]}"; do
 
     if [[ "$CAT" == "color" || "$CAT" == "shape" || "$CAT" == "texture" ]]; then
         cd "${COMP}/BLIPvqa_eval"
-        python3 BLIP_vqa.py --out_dir="../examples/"
+        $PYTHON BLIP_vqa.py --out_dir="../examples/"
         mkdir -p "${ROOT}/${CAT}"
         cp "${COMP}/examples/annotation_blip/vqa_result.json" "${ROOT}/${CAT}/vqa_result.json"
 
     elif [[ "$CAT" == "spatial" ]]; then
         cd "${COMP}/UniDet_eval"
-        python3 2D_spatial_eval.py
+        $PYTHON 2D_spatial_eval.py
         mkdir -p "${ROOT}/${CAT}"
         cp "${COMP}/examples/labels/annotation_obj_detection_2d/vqa_result.json" "${ROOT}/${CAT}/vqa_result.json"
 
     elif [[ "$CAT" == "non_spatial" ]]; then
         cd "$COMP"
-        python3 CLIPScore_eval/CLIP_similarity.py --outpath examples/
+        $PYTHON CLIPScore_eval/CLIP_similarity.py --outpath examples/
         mkdir -p "${ROOT}/${CAT}"
         cp "${COMP}/examples/annotation_clip/vqa_result.json" "${ROOT}/${CAT}/vqa_result.json"
 
     elif [[ "$CAT" == "complex" ]]; then
         cd "${COMP}/3_in_1_eval"
-        python3 3_in_1.py --outpath ../examples/
+        $PYTHON 3_in_1.py --outpath ../examples/
         mkdir -p "${ROOT}/${CAT}"
         cp "${COMP}/examples/annotation_3_in_1/vqa_result.json" "${ROOT}/${CAT}/vqa_result.json"
     fi
@@ -127,7 +128,7 @@ for CAT in "${CATEGORIES[@]}"; do
 done
 
 # --- Step 3: summarize -------------------------------------------------
-python3 ${PROJECT}/scripts_compbench/summarize_compbench_results.py \
+$PYTHON ${PROJECT}/scripts_compbench/summarize_compbench_results.py \
     --run-dir    "$ROOT" \
     --categories color shape texture spatial non_spatial complex \
     --out        "$ROOT/compbench_1sample_summary.json"
