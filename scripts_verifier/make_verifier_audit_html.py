@@ -52,7 +52,7 @@ def _bar(v, color="#5af"):
 def _b64_img(path, ext=None):
     """Return a data URI for the image at path, or empty string if missing."""
     p = Path(path)
-    if not p.exists():
+    if not p.is_file():
         return ""
     suffix = (ext or p.suffix).lstrip(".").lower()
     mime = "image/jpeg" if suffix in ("jpg", "jpeg") else "image/png"
