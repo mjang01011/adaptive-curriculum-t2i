@@ -133,7 +133,7 @@ def main():
             # strip internal contour before writing
             clean_result = {k: v for k, v in result.items() if not k.startswith("_")}
 
-            row = {**{k: sample[k] for k in ("id", "prompt", "seed", "relation")
+            row = {**{k: sample[k] for k in ("id", "prompt", "seed", "relation", "image_path")
                       if k in sample},
                    **clean_result}
             f_out.write(json.dumps(row) + "\n")
