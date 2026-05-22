@@ -1,20 +1,27 @@
 """
-Generate images for synthetic shape prompts using LlamaGen.
+Generate images for synthetic shape prompts using LlamaGen or Janus-Pro.
 
-Usage:
+Usage (LlamaGen):
   python scripts_verifier/generate_shape_images.py \
     --input-jsonl data_synthetic_shapes/val.jsonl \
     --model llamagen \
-    --num-generations 6 \
-    --cfg-scale 2.0 \
-    --seeds 0 1 2 3 4 5 \
+    --num-generations 6 --seeds 0 1 2 3 4 5 \
+    --cfg-scale 2.0 --batch-size 4 \
     --output-dir outputs_verifier/base_shapes_val_g6 \
     --base-config adaptive_curriculum/configs/experiment.yaml \
     --repo-root /viscam/.../LlamaGen \
     --gpt-ckpt .../t2i_XL_stage1_256.pt \
     --vq-ckpt .../vq_ds16_t2i.pt \
-    --t5-path .../t5-ckpt \
-    --batch-size 4
+    --t5-path .../t5-ckpt
+
+Usage (Janus — run in januspro_venv):
+  python scripts_verifier/generate_shape_images.py \
+    --input-jsonl data_synthetic_shapes/val.jsonl \
+    --model janus \
+    --num-generations 6 --seeds 0 1 2 3 4 5 \
+    --cfg-weight 5.0 --temperature 1.0 --batch-size 4 \
+    --output-dir outputs_verifier/janus_shapes_val_g6 \
+    --model-path deepseek-ai/Janus-Pro-1B
 """
 import argparse
 import json
@@ -32,36 +39,14 @@ def load_jsonl(path):
     return rows
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input-jsonl",   required=True)
-    parser.add_argument("--model",         default="llamagen", choices=["llamagen"])
-    parser.add_argument("--num-generations", type=int, default=6)
-    parser.add_argument("--cfg-scale",     type=float, default=2.0)
-    parser.add_argument("--seeds",         type=int, nargs="+", default=None)
-    parser.add_argument("--output-dir",    required=True)
-    parser.add_argument("--batch-size",    type=int, default=4)
-    # LlamaGen model paths
-    parser.add_argument("--base-config",   default="adaptive_curriculum/configs/experiment.yaml")
-    parser.add_argument("--repo-root",     required=True)
-    parser.add_argument("--gpt-ckpt",      required=True)
-    parser.add_argument("--vq-ckpt",       required=True)
-    parser.add_argument("--t5-path",       required=True)
-    parser.add_argument("--t5-cache-dir",  default=None)
-    args = parser.parse_args()
+def _batches(items, bs):
+    for i in range(0, len(items), bs):
+        yield items[i:i + bs]
 
-    seeds = args.seeds if args.seeds is not None else list(range(args.num_generations))
-    assert len(seeds) >= args.num_generations, "Need at least num_generations seeds"
-    seeds = seeds[:args.num_generations]
 
-    out_dir   = Path(args.output_dir)
-    img_dir   = out_dir / "images"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    img_dir.mkdir(exist_ok=True)
+# ── LlamaGen generation ───────────────────────────────────────────────────────
 
-    rows = load_jsonl(args.input_jsonl)
-    print(f"[gen_shapes] {len(rows)} prompts  seeds={seeds}  cfg={args.cfg_scale}")
-
+def generate_llamagen(rows, seeds, args, out_dir, img_dir):
     sys.path.insert(0, args.repo_root)
     from omegaconf import OmegaConf
     base_cfg = OmegaConf.load(args.base_config)
@@ -88,20 +73,15 @@ def main():
         use_lora=False,
     )
 
-    def _batches(items, bs):
-        for i in range(0, len(items), bs):
-            yield items[i:i + bs]
-
     samples = []
-
     for seed in seeds:
         seed_dir = img_dir / f"seed_{seed:02d}"
         seed_dir.mkdir(exist_ok=True)
-        print(f"\n[gen_shapes] seed={seed}")
+        print(f"\n[gen] LlamaGen  seed={seed}")
 
         for batch in _batches(rows, args.batch_size):
-            prompts     = [r["prompt"] for r in batch]
-            prompt_ids  = [r["id"]     for r in batch]
+            prompts      = [r["prompt"] for r in batch]
+            prompt_ids   = [r["id"]     for r in batch]
             bucket_names = ["synthetic_shapes"] * len(batch)
 
             img_paths, _ = model.generate_with_tokens(
@@ -115,29 +95,120 @@ def main():
             )
 
             for row, img_path in zip(batch, img_paths):
-                # normalise to relative path if possible
                 try:
                     rel = str(Path(img_path).relative_to(out_dir))
                 except ValueError:
                     rel = img_path
-                samples.append({
-                    "id":           row["id"],
-                    "prompt":       row["prompt"],
-                    "sample_index": seeds.index(seed),
-                    "seed":         seed,
-                    "image_path":   rel,
-                    "objects":      row["objects"],
-                    "relation":     row.get("relation", ""),
-                })
+                samples.append(_sample_row(row, seed, seeds, rel))
 
         print(f"  seed={seed} done")
+
+    return samples
+
+
+# ── Janus generation ──────────────────────────────────────────────────────────
+
+def generate_janus(rows, seeds, args, out_dir, img_dir):
+    import torch
+    sys.path.insert(0, str(Path(__file__).parents[1]))
+    from scripts_janus.janus_wrapper import JanusProWrapper
+
+    wrapper = JanusProWrapper(
+        model_path=args.model_path,
+        cfg_weight=args.cfg_weight,
+        temperature=args.temperature,
+    )
+    _ = wrapper.model  # trigger load
+    print("[gen] Janus loaded.")
+
+    samples = []
+    for seed in seeds:
+        seed_dir = img_dir / f"seed_{seed:02d}"
+        seed_dir.mkdir(exist_ok=True)
+        print(f"\n[gen] Janus  seed={seed}")
+
+        for batch in _batches(rows, args.batch_size):
+            prompts = [r["prompt"] for r in batch]
+            torch.manual_seed(seed)
+            torch.cuda.manual_seed(seed)
+            out = wrapper.generate_images(prompts, seeds=None)
+
+            for row, pil_img in zip(batch, out["images"]):
+                fname = f"{row['id']}_seed{seed}.png"
+                fpath = seed_dir / fname
+                pil_img.save(fpath)
+                rel = str(fpath.relative_to(out_dir))
+                samples.append(_sample_row(row, seed, seeds, rel))
+
+        print(f"  seed={seed} done")
+
+    return samples
+
+
+# ── shared ────────────────────────────────────────────────────────────────────
+
+def _sample_row(row, seed, seeds, rel_path):
+    return {
+        "id":           row["id"],
+        "prompt":       row["prompt"],
+        "sample_index": seeds.index(seed),
+        "seed":         seed,
+        "image_path":   rel_path,
+        "objects":      row["objects"],
+        "relation":     row.get("relation", ""),
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-jsonl",    required=True)
+    parser.add_argument("--model",          default="llamagen", choices=["llamagen", "janus"])
+    parser.add_argument("--num-generations", type=int, default=6)
+    parser.add_argument("--seeds",          type=int, nargs="+", default=None)
+    parser.add_argument("--output-dir",     required=True)
+    parser.add_argument("--batch-size",     type=int, default=4)
+
+    # LlamaGen args
+    parser.add_argument("--base-config",    default="adaptive_curriculum/configs/experiment.yaml")
+    parser.add_argument("--repo-root",      default=None)
+    parser.add_argument("--gpt-ckpt",       default=None)
+    parser.add_argument("--vq-ckpt",        default=None)
+    parser.add_argument("--t5-path",        default=None)
+    parser.add_argument("--t5-cache-dir",   default=None)
+    parser.add_argument("--cfg-scale",      type=float, default=2.0)
+
+    # Janus args
+    parser.add_argument("--model-path",     default="deepseek-ai/Janus-Pro-1B")
+    parser.add_argument("--cfg-weight",     type=float, default=5.0)
+    parser.add_argument("--temperature",    type=float, default=1.0)
+
+    args = parser.parse_args()
+
+    seeds = args.seeds if args.seeds is not None else list(range(args.num_generations))
+    seeds = seeds[:args.num_generations]
+
+    out_dir = Path(args.output_dir)
+    img_dir = out_dir / "images"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    img_dir.mkdir(exist_ok=True)
+
+    rows = load_jsonl(args.input_jsonl)
+    print(f"[gen] {len(rows)} prompts  model={args.model}  seeds={seeds}")
+
+    if args.model == "llamagen":
+        for req in ("repo_root", "gpt_ckpt", "vq_ckpt", "t5_path"):
+            if getattr(args, req) is None:
+                raise ValueError(f"--{req.replace('_', '-')} required for LlamaGen")
+        samples = generate_llamagen(rows, seeds, args, out_dir, img_dir)
+    else:
+        samples = generate_janus(rows, seeds, args, out_dir, img_dir)
 
     samples_path = out_dir / "samples.jsonl"
     with open(samples_path, "w", encoding="utf-8") as f:
         for s in samples:
             f.write(json.dumps(s) + "\n")
 
-    print(f"\n[gen_shapes] {len(samples)} samples saved → {samples_path}")
+    print(f"\n[gen] {len(samples)} samples → {samples_path}")
 
 
 if __name__ == "__main__":
