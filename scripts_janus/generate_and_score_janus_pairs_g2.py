@@ -29,7 +29,6 @@ _REPO = Path(__file__).parents[1]
 sys.path.insert(0, str(_REPO))
 
 from adaptive_curriculum.data.schemas import BucketItem
-from adaptive_curriculum.reward.vlm_reward import RewardModel as VLMRewardModel
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -132,7 +131,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-jsonl",   required=True)
     parser.add_argument("--output-dir",    required=True)
-    parser.add_argument("--num-prompts",   type=int, default=200)
+    parser.add_argument("--num-prompts",   type=int, default=64)
+    parser.add_argument("--qwen-model",    default="Qwen/Qwen3-VL-4B-Instruct")
     parser.add_argument("--model-path",    default="deepseek-ai/Janus-Pro-1B")
     parser.add_argument("--seeds",         type=int, nargs="+", default=[0, 1])
     parser.add_argument("--cfg-weight",    type=float, default=5.0)
@@ -168,13 +168,8 @@ def main():
     _ = wrapper.model
     print("[gen] Janus loaded.")
 
-    # Qwen reward model — reuse VLMRewardModel with a minimal config shim
-    from omegaconf import OmegaConf
-    reward_cfg = OmegaConf.create({
-        "model": {"vlm_model": "Qwen/Qwen2-VL-2B-Instruct"},
-        "evaluation": {"reward_model": "vlm"},
-    })
-    reward_model = VLMRewardModel(reward_cfg)
+    from adaptive_curriculum.reward.vlm_reward import Qwen3VLRewardModel
+    reward_model = Qwen3VLRewardModel(model_id=args.qwen_model)
     print("[gen] Qwen loaded.\n")
 
     # ── generate + score ──────────────────────────────────────────────────────

@@ -205,6 +205,7 @@ def main():
     parser.add_argument("--epochs",            type=int,   default=2)
     parser.add_argument("--batch-size",        type=int,   default=1)
     parser.add_argument("--eval-every-steps",  type=int,   default=25)
+    parser.add_argument("--qwen-model",        default="Qwen/Qwen3-VL-4B-Instruct")
     parser.add_argument("--val-prompts",       type=int,   default=20)
     parser.add_argument("--val-seeds",         type=int,   nargs="+", default=[0, 1])
     parser.add_argument("--cfg-weight",        type=float, default=5.0)
@@ -263,13 +264,8 @@ def main():
     print("[dpo] Janus + LoRA loaded.")
 
     # ── reward model ──────────────────────────────────────────────────────────
-    from omegaconf import OmegaConf
-    from adaptive_curriculum.reward.vlm_reward import RewardModel as VLMRewardModel
-    reward_cfg = OmegaConf.create({
-        "model": {"vlm_model": "Qwen/Qwen2-VL-2B-Instruct"},
-        "evaluation": {"reward_model": "vlm"},
-    })
-    reward_model = VLMRewardModel(reward_cfg)
+    from adaptive_curriculum.reward.vlm_reward import Qwen3VLRewardModel
+    reward_model = Qwen3VLRewardModel(model_id=args.qwen_model)
     print("[dpo] Qwen loaded.\n")
 
     # ── step 0 baseline eval ──────────────────────────────────────────────────
