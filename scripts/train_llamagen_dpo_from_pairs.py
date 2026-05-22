@@ -135,7 +135,7 @@ def run_val_eval(wrapper, reward_model, val_items_by_bucket, val_seeds, step,
     with torch.no_grad():
         for bucket, val_items in val_items_by_bucket.items():
             for seed in val_seeds:
-                torch.manual_seed(seed)
+                torch.manual_seed(seed + hash(bucket) % 10000)
                 B       = len(val_items)
                 qzshape = [B, wrapper.codebook_embed_dim,
                            wrapper.latent_size, wrapper.latent_size]
@@ -193,8 +193,10 @@ def run_val_eval(wrapper, reward_model, val_items_by_bucket, val_seeds, step,
                 if base:
                     cols += f"<td><div style='font-size:9px;color:#888'>base</div><img src='{_b64(base)}' style='width:110px'></td>"
                 rcolor = "#6f6" if cur_r >= 0.6 else "#ff6" if cur_r >= 0.3 else "#f66"
+                img_html = (f"<img src='{_b64(cur)}' style='width:110px'>"
+                            if cur is not None else "<div style='width:110px;height:110px;background:#333'>[missing]</div>")
                 cols  += (f"<td><div style='font-size:9px;color:{rcolor}'>s{seed} r={cur_r:.3f}</div>"
-                          f"<img src='{_b64(cur)}' style='width:110px'></td>")
+                          f"{img_html}</td>")
             rows_html += f"<tr>{cols}</tr>"
 
     seed_hdrs = "".join(
@@ -274,7 +276,7 @@ h1{{color:#7cf}} table{{border-collapse:collapse}} td,th{{border:1px solid #333;
                     key = f"val_images/{bucket}/{item.id}/seed{seed}"
                     log_dict[key] = _wandb.Image(img_to_log, caption=caption)
 
-        wandb_run.log(log_dict)
+        wandb_run.log(log_dict, step=step)
 
     return mean_r, comp_means, new_images
 
@@ -424,8 +426,6 @@ def main():
             batch = all_pairs[i: i + args.batch_size]
             if not batch:
                 continue
-            global_step += 1
-            t0 = time.time()
 
             wrapper.gpt.train()
 
@@ -453,6 +453,9 @@ def main():
 
             if not pair_items:
                 continue
+
+            global_step += 1
+            t0 = time.time()
 
             chosen_tokens   = torch.stack(chosen_tok_list)    # (B, seq_len)
             rejected_tokens = torch.stack(rejected_tok_list)  # (B, seq_len)
@@ -516,7 +519,8 @@ def main():
                  "mean_margin": mean_margin, "grad_norm": grad_norm}
             metrics_log.append(m)
             if wandb_run:
-                wandb_run.log({f"train/{k}": v for k, v in m.items()})
+                wandb_run.log({f"train/{k}": v for k, v in m.items()},
+                              step=global_step)
 
             # ── periodic val eval ─────────────────────────────────────────────
             if global_step % args.eval_every_steps == 0:

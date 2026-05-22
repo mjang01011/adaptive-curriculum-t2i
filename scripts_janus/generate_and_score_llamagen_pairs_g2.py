@@ -132,6 +132,10 @@ def main():
     parser.add_argument("--save-tokens",     action="store_true")
     parser.add_argument("--init-checkpoint", default=None,
                         help="Path to best_checkpoint.pt from previous DPO round.")
+    # LoRA config — must match the training run that produced --init-checkpoint
+    parser.add_argument("--lora-r",            type=int, default=16)
+    parser.add_argument("--lora-alpha",        type=int, default=32)
+    parser.add_argument("--lora-target-modules", nargs="+", default=["wqkv", "wo"])
     args = parser.parse_args()
 
     assert len(args.seeds) == 2, "G=2 requires exactly 2 seeds"
@@ -152,6 +156,16 @@ def main():
     sys.path.insert(0, args.repo_root)
     from adaptive_curriculum.model.llamagen_wrapper import LlamaGenWrapper
 
+    lora_cfg = None
+    if args.init_checkpoint:
+        lora_cfg = {
+            "rank":           args.lora_r,
+            "alpha":          args.lora_alpha,
+            "dropout":        0.0,
+            "target_modules": args.lora_target_modules,
+            "start_layer":    0,
+        }
+
     wrapper = LlamaGenWrapper(
         repo_root=args.repo_root,
         vq_ckpt=args.vq_ckpt,
@@ -159,6 +173,7 @@ def main():
         t5_path=args.t5_path,
         cfg_scale=args.cfg_scale,
         use_lora=bool(args.init_checkpoint),
+        lora_config=lora_cfg,
     )
     _ = wrapper.gpt
     _ = wrapper.vq_model

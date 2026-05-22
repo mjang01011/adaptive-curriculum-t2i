@@ -56,8 +56,9 @@ def main():
     parser.add_argument("--t5-path",        required=True)
     parser.add_argument("--cfg-scale",      type=float, default=2.0)
     # lora
-    parser.add_argument("--lora-r",         type=int, default=16)
-    parser.add_argument("--lora-alpha",     type=int, default=32)
+    parser.add_argument("--lora-r",             type=int, default=16)
+    parser.add_argument("--lora-alpha",         type=int, default=32)
+    parser.add_argument("--lora-target-modules", nargs="+", default=["wqkv", "wo"])
     # iterative config
     parser.add_argument("--num-rounds",     type=int, default=3)
     parser.add_argument("--epochs",         type=int, nargs="+", default=None,
@@ -128,7 +129,12 @@ def main():
             "--save-tokens",
         ]
         if prev_ckpt:
-            gen_cmd += ["--init-checkpoint", str(prev_ckpt)]
+            gen_cmd += [
+                "--init-checkpoint",     str(prev_ckpt),
+                "--lora-r",              str(args.lora_r),
+                "--lora-alpha",          str(args.lora_alpha),
+                "--lora-target-modules", *args.lora_target_modules,
+            ]
 
         run(gen_cmd, f"Round {r+1} — pair generation")
 
@@ -146,6 +152,7 @@ def main():
             "--cfg-scale",         str(args.cfg_scale),
             "--lora-r",            str(args.lora_r),
             "--lora-alpha",        str(args.lora_alpha),
+            "--lora-target-modules", *args.lora_target_modules,
             "--lr",                str(lr),
             "--beta",              str(args.beta),
             "--sft-lambda",        str(args.sft_lambda),
