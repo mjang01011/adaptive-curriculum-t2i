@@ -222,6 +222,42 @@ def _quality_score(detections, image_area):
     return 1.0
 
 
+# ── object → shape family ─────────────────────────────────────────────────────
+
+OBJECT_FAMILY = {
+    "ball":  "circle",
+    "coin":  "circle",
+    "plate": "circle",
+    "book":  "rect",
+    "box":   "rect",
+    "window": "rect",
+    "kite":  "triangle",
+    "cone":  "triangle",
+    "tent":  "triangle",
+}
+
+# map family names to what _shape_score expects
+FAMILY_TO_SHAPE = {
+    "circle":   "circle",
+    "rect":     "square",   # square heuristics work for rectangles too
+    "triangle": "triangle",
+    # pass-through for raw shape mode
+    "square":   "square",
+}
+
+
+def _resolve_shape(obj):
+    """Return the shape string to pass to _shape_score for this object."""
+    if "family" in obj:
+        return FAMILY_TO_SHAPE.get(obj["family"], "circle")
+    if "shape" in obj:
+        return FAMILY_TO_SHAPE.get(obj["shape"], obj["shape"])
+    if "object" in obj:
+        family = OBJECT_FAMILY.get(obj["object"], "circle")
+        return FAMILY_TO_SHAPE.get(family, "circle")
+    return "circle"
+
+
 # ── public API ────────────────────────────────────────────────────────────────
 
 def verify_image(image_path, metadata):
@@ -246,7 +282,8 @@ def verify_image(image_path, metadata):
 
     dets = []
     for obj in objects:
-        d = _detect(img_hsv, obj["color"], obj["shape"], image_area)
+        shape = _resolve_shape(obj)
+        d = _detect(img_hsv, obj["color"], shape, image_area)
         dets.append(d)
 
     quality    = _quality_score(dets, image_area)
