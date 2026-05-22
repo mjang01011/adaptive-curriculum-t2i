@@ -46,7 +46,7 @@ def _read_prompts(path: str, limit: int) -> list:
 
 def generate(mmgpt, processor, prompt_text,
              cfg_weight=5.0, temperature=1.0,
-             parallel_size=1,
+             parallel_size=4,
              image_token_num=576, img_size=384, patch_size=16):
     conversation = [
         {"role": "<|User|>",      "content": prompt_text},
@@ -108,7 +108,8 @@ def main():
     parser.add_argument("--category",     required=True)
     parser.add_argument("--model-path",   default="deepseek-ai/Janus-Pro-1B")
     parser.add_argument("--output-dir",   required=True)
-    parser.add_argument("--seed",         type=int, default=42)
+    parser.add_argument("--seed",         type=int, default=-1,
+                        help="Random seed (-1 = no seed)")
     parser.add_argument("--cfg-weight",   type=float, default=5.0)
     parser.add_argument("--temperature",  type=float, default=1.0)
     parser.add_argument("--limit",        type=int, default=-1,
@@ -122,9 +123,10 @@ def main():
     print(f"[janus_gen] category={args.category}  prompts={len(prompts)}  "
           f"model={args.model_path}")
 
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-    torch.cuda.manual_seed(args.seed)
+    if args.seed >= 0:
+        torch.manual_seed(args.seed)
+        np.random.seed(args.seed)
+        torch.cuda.manual_seed(args.seed)
 
     print("[janus_gen] Loading model...")
     processor = VLChatProcessor.from_pretrained(args.model_path)
