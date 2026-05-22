@@ -160,9 +160,10 @@ def _relation_score(d1, d2, relation, image_w, image_h):
     else:
         return 0.5
 
+    # soft scoring: clearly correct / overlapping-but-directional / wrong
     if delta > margin:
         return 1.0
-    if delta > 0:
+    if delta > -margin:   # close / overlapping but not clearly wrong
         return 0.5
     return 0.0
 
@@ -221,12 +222,12 @@ def verify_image(image_path, metadata):
             "quality":    quality,
         }
         reward = (
-            0.15 * components["obj1_color"]
-            + 0.15 * components["obj2_color"]
-            + 0.15 * components["obj1_shape"]
-            + 0.15 * components["obj2_shape"]
-            + 0.30 * components["relation"]
-            + 0.10 * components["quality"]
+            0.20  * components["obj1_color"]
+            + 0.20  * components["obj2_color"]
+            + 0.075 * components["obj1_shape"]
+            + 0.075 * components["obj2_shape"]
+            + 0.35  * components["relation"]
+            + 0.10  * components["quality"]
         )
     elif len(dets) == 2:
         # no relation — attribute-only
@@ -238,10 +239,10 @@ def verify_image(image_path, metadata):
             "quality":    quality,
         }
         reward = (
-            0.20 * components["obj1_color"]
-            + 0.20 * components["obj2_color"]
-            + 0.20 * components["obj1_shape"]
-            + 0.20 * components["obj2_shape"]
+            0.25 * components["obj1_color"]
+            + 0.25 * components["obj2_color"]
+            + 0.15 * components["obj1_shape"]
+            + 0.15 * components["obj2_shape"]
             + 0.10 * components["quality"]
         )
     else:

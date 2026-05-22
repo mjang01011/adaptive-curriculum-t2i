@@ -128,7 +128,7 @@ def generate_janus(rows, seeds, args, out_dir, img_dir):
         print(f"\n[gen] Janus  seed={seed}")
 
         for batch in _batches(rows, args.batch_size):
-            prompts = [r["prompt"] for r in batch]
+            prompts = [args.prompt_prefix + r["prompt"] for r in batch]
             torch.manual_seed(seed)
             torch.cuda.manual_seed(seed)
             out = wrapper.generate_images(prompts, seeds=None)
@@ -181,6 +181,8 @@ def main():
     parser.add_argument("--model-path",     default="deepseek-ai/Janus-Pro-1B")
     parser.add_argument("--cfg-weight",     type=float, default=5.0)
     parser.add_argument("--temperature",    type=float, default=1.0)
+    parser.add_argument("--prompt-prefix",  default="",
+                        help="Prepend to every prompt, e.g. 'simple flat icon, white background: '")
 
     args = parser.parse_args()
 
