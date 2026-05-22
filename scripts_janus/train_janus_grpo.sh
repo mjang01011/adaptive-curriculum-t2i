@@ -38,5 +38,5 @@ export PYTHONPATH=${PROJECT}:${JANUS_PROJECT}:${PYTHONPATH}
 
 cd ${PROJECT}
 
-python3 ${JANUS_PROJECT}/scripts_janus/train_janus_grpo.py \
+python3 ${PROJECT}/scripts_janus/train_janus_grpo.py \
     --config ${PROJECT}/${CONFIG}
