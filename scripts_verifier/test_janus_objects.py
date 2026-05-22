@@ -136,6 +136,7 @@ def main():
     parser.add_argument("--seed",       type=int, default=42)
     parser.add_argument("--seeds",      type=int, nargs="+", default=None,
                         help="Generate multiple seeds per prompt")
+    parser.add_argument("--cfg-weight", type=float, default=5.0)
     args = parser.parse_args()
 
     seeds   = args.seeds or [args.seed]
@@ -145,8 +146,8 @@ def main():
     sys.path.insert(0, str(Path(__file__).parents[1]))
     from scripts_janus.janus_wrapper import JanusProWrapper
 
-    print("[test] Loading Janus...")
-    wrapper = JanusProWrapper(model_path=args.model_path, cfg_weight=5.0, temperature=1.0)
+    print(f"[test] Loading Janus... cfg_weight={args.cfg_weight}")
+    wrapper = JanusProWrapper(model_path=args.model_path, cfg_weight=args.cfg_weight, temperature=1.0)
     _ = wrapper.model
     print(f"[test] Model loaded. Running {len(TEST_CASES)} prompts × {len(seeds)} seeds.\n")
 
