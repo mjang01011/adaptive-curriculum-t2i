@@ -1,0 +1,71 @@
+experiment_name: janus_attribute_only_gcpo_lite
+model: deepseek-ai/Janus-Pro-1B
+strategy: fixed_bucket
+fixed_bucket: attribute_binding
+
+data:
+  root: /viscam/u/jj277/adaptive-curriculum-t2i/data
+  train_file: /viscam/u/jj277/adaptive-curriculum-t2i/data/attribute_binding/attribute_binding_train_500.jsonl
+  val_file: /viscam/u/jj277/adaptive-curriculum-t2i/data/attribute_binding/attribute_binding_val_20.jsonl
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.0
+  target_scope: language_model
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+
+training:
+  num_curriculum_steps: 10
+  gradient_steps_per_curriculum_step: 2
+  train_batch_size: 1
+  learning_rate: 1.0e-5
+  max_grad_norm: 1.0
+  save_checkpoints: true
+  save_every: 5
+  output_root: /viscam/u/jj277/janus_project/outputs_janus_grpo
+
+grpo:
+  num_samples: 4
+  beta: 0.05
+  reward_mode: pseudo_soft_grpo_target_heavy
+  normalize_advantages: true
+  advantage_eps: 1.0e-4
+  logprob_reduction: sum_sqrt_len
+  token_weighting: gcpo_lite
+  grid_size: 24
+  initial_ratio: 0.10
+  entropy_gradient_ratio: 0.20
+  background_weight: 0.2
+  normalize_token_weights: true
+
+generation:
+  cfg_weight: 5.0
+  temperature: 1.0
+  image_token_num_per_image: 576
+  img_size: 384
+  patch_size: 16
+
+evaluation:
+  reward_mode: hard_target
+  probe_eval_before_training: true
+  eval_probe_fixed: true
+  probe_num_prompts: 8
+  probe_seeds: [0, 1, 2, 3]
+  eval_probe_every: 2
+  full_eval_every_curriculum_step: 5
+  num_val_prompts_per_bucket: 20
+  num_samples_per_prompt: 4
+
+logging:
+  use_wandb: true
+  wandb_project: janus-grpo
+  log_reward_components: true
+  log_hard_target_on_train_samples: true
+  log_kl: true
+  log_entropy: true
+  log_generated_examples: true
