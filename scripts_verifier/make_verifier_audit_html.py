@@ -9,6 +9,7 @@ Usage:
     --out              outputs_verifier/base_shapes_val_g6/verifier_audit.html
 """
 import argparse
+import base64
 import csv
 import json
 import os
@@ -48,12 +49,16 @@ def _bar(v, color="#5af"):
             f'<div class="reward-fill" style="width:{pct}%;background:{color}"></div>'
             f'</div>')
 
-def _rel_img(base_path, ref_path):
-    """Return relative path from ref_path's parent to base_path."""
-    try:
-        return os.path.relpath(str(base_path), str(Path(ref_path).parent))
-    except ValueError:
-        return str(base_path)
+def _b64_img(path, ext=None):
+    """Return a data URI for the image at path, or empty string if missing."""
+    p = Path(path)
+    if not p.exists():
+        return ""
+    suffix = (ext or p.suffix).lstrip(".").lower()
+    mime = "image/jpeg" if suffix in ("jpg", "jpeg") else "image/png"
+    data = base64.b64encode(p.read_bytes()).decode()
+    return f"data:{mime};base64,{data}"
+
 
 def _card(row, images_root, overlays_root, html_path):
     sid   = row.get("id", "")
@@ -63,14 +68,14 @@ def _card(row, images_root, overlays_root, html_path):
     comps  = row.get("components", {})
     dets   = row.get("detections", [])
 
-    # original image path
+    # original image (embedded as base64)
     img_rel = row.get("image_path", "")
     img_abs = Path(images_root) / img_rel if img_rel and not Path(img_rel).is_absolute() else Path(img_rel)
-    img_src = _rel_img(img_abs, html_path) if img_abs.exists() else ""
+    img_src = _b64_img(img_abs)
 
     # overlay
     overlay_abs = Path(overlays_root) / f"{sid}_seed{seed}.jpg"
-    ov_src = _rel_img(overlay_abs, html_path) if overlay_abs.exists() else ""
+    ov_src = _b64_img(overlay_abs)
 
     img_tag = lambda src: f'<img src="{src}" loading="lazy">' if src else '<div style="width:140px;height:140px;background:#333;display:inline-block"></div>'
 
