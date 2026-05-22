@@ -88,6 +88,7 @@ class JanusProWrapper:
             self.model_path,
             language_config=language_config,
             trust_remote_code=True,
+            low_cpu_mem_usage=False,
         )
         model = model.to(torch.bfloat16).cuda().eval()
 
