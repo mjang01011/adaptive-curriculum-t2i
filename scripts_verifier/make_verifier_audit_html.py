@@ -187,7 +187,8 @@ def main():
     # CSV
     csv_path = html_path.with_name("verifier_audit_candidates.csv")
     fieldnames = ["id", "seed", "image_path", "reward", "relation",
-                  "obj1_color", "obj2_color", "obj1_shape", "obj2_shape", "quality"]
+                  "obj1_color", "obj2_color", "obj1_shape", "obj2_shape",
+                  "separation", "area_ratio", "quality"]
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -203,6 +204,8 @@ def main():
                 "obj2_color": round(comps.get("obj2_color", 0), 4),
                 "obj1_shape": round(comps.get("obj1_shape", 0), 4),
                 "obj2_shape": round(comps.get("obj2_shape", 0), 4),
+                "separation": round(comps.get("separation", 0), 4),
+                "area_ratio": round(comps.get("area_ratio", 0), 4),
                 "quality":    round(comps.get("quality", 0), 4),
             })
     print(f"[audit] CSV  → {csv_path}")

@@ -88,7 +88,6 @@ def _shape_score(contour, expected_shape):
     if expected_shape == "square":
         if n_verts == 4:
             return 1.0, pred
-        # fallback: near-square bounding box
         x, y, bw, bh = cv2.boundingRect(contour)
         ratio = bw / (bh + 1e-6)
         if 0.7 < ratio < 1.43:
@@ -138,10 +137,52 @@ def _detect(hsv, color, shape, image_area):
     }
 
 
+# ── IoU + separation ──────────────────────────────────────────────────────────
+
+def _iou(bbox1, bbox2):
+    x1 = max(bbox1[0], bbox2[0])
+    y1 = max(bbox1[1], bbox2[1])
+    x2 = min(bbox1[2], bbox2[2])
+    y2 = min(bbox1[3], bbox2[3])
+    inter = max(0, x2 - x1) * max(0, y2 - y1)
+    a1 = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1])
+    a2 = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1])
+    union = a1 + a2 - inter
+    return inter / (union + 1e-6)
+
+
+def _separation_score(d1, d2):
+    if not d1["detected"] or not d2["detected"]:
+        return 0.0
+    iou = _iou(d1["bbox"], d2["bbox"])
+    if iou < 0.10:
+        return 1.0
+    if iou < 0.25:
+        return 0.5
+    return 0.0
+
+
+# ── area ratio ────────────────────────────────────────────────────────────────
+
+def _area_ratio_score(d1, d2):
+    if not d1["detected"] or not d2["detected"]:
+        return 0.0
+    a1, a2 = d1["area"], d2["area"]
+    if a1 == 0 or a2 == 0:
+        return 0.0
+    ratio = max(a1, a2) / (min(a1, a2) + 1e-6)
+    if ratio < 4:
+        return 1.0
+    if ratio < 8:
+        return 0.5
+    return 0.0
+
+
 # ── relation score ────────────────────────────────────────────────────────────
 
 def _relation_score(d1, d2, relation, image_w, image_h):
-    if d1["center"] is None or d2["center"] is None:
+    # both objects must be detected for relation to count
+    if not d1["detected"] or not d2["detected"]:
         return 0.0
     cx1, cy1 = d1["center"]
     cx2, cy2 = d2["center"]
@@ -160,10 +201,9 @@ def _relation_score(d1, d2, relation, image_w, image_h):
     else:
         return 0.5
 
-    # soft scoring: clearly correct / overlapping-but-directional / wrong
     if delta > margin:
         return 1.0
-    if delta > -margin:   # close / overlapping but not clearly wrong
+    if delta > -margin:
         return 0.5
     return 0.0
 
@@ -209,52 +249,62 @@ def verify_image(image_path, metadata):
         d = _detect(img_hsv, obj["color"], obj["shape"], image_area)
         dets.append(d)
 
-    quality = _quality_score(dets, image_area)
+    quality    = _quality_score(dets, image_area)
 
     if len(dets) == 2 and relation:
-        rel_score = _relation_score(dets[0], dets[1], relation, w, h)
+        rel_score  = _relation_score(dets[0], dets[1], relation, w, h)
+        sep_score  = _separation_score(dets[0], dets[1])
+        ar_score   = _area_ratio_score(dets[0], dets[1])
         components = {
             "obj1_color": dets[0]["color_score"],
             "obj2_color": dets[1]["color_score"],
             "obj1_shape": dets[0]["shape_score"],
             "obj2_shape": dets[1]["shape_score"],
             "relation":   rel_score,
+            "separation": sep_score,
+            "area_ratio": ar_score,
             "quality":    quality,
         }
         reward = (
             0.20  * components["obj1_color"]
             + 0.20  * components["obj2_color"]
-            + 0.075 * components["obj1_shape"]
-            + 0.075 * components["obj2_shape"]
-            + 0.35  * components["relation"]
-            + 0.10  * components["quality"]
+            + 0.05  * components["obj1_shape"]
+            + 0.05  * components["obj2_shape"]
+            + 0.25  * components["relation"]
+            + 0.20  * components["separation"]
+            + 0.10  * components["area_ratio"]
+            + 0.05  * components["quality"]
         )
     elif len(dets) == 2:
-        # no relation — attribute-only
+        sep_score  = _separation_score(dets[0], dets[1])
+        ar_score   = _area_ratio_score(dets[0], dets[1])
         components = {
             "obj1_color": dets[0]["color_score"],
             "obj2_color": dets[1]["color_score"],
             "obj1_shape": dets[0]["shape_score"],
             "obj2_shape": dets[1]["shape_score"],
+            "separation": sep_score,
+            "area_ratio": ar_score,
             "quality":    quality,
         }
         reward = (
-            0.25 * components["obj1_color"]
-            + 0.25 * components["obj2_color"]
-            + 0.15 * components["obj1_shape"]
-            + 0.15 * components["obj2_shape"]
-            + 0.10 * components["quality"]
+            0.25  * components["obj1_color"]
+            + 0.25  * components["obj2_color"]
+            + 0.10  * components["obj1_shape"]
+            + 0.10  * components["obj2_shape"]
+            + 0.15  * components["separation"]
+            + 0.10  * components["area_ratio"]
+            + 0.05  * components["quality"]
         )
     else:
         components = {"quality": quality}
         reward = quality * 0.1
 
-    # strip non-serialisable contour before returning
     clean_dets = [{k: v for k, v in d.items() if k != "contour"} for d in dets]
 
     return {
         "reward":      round(float(reward), 4),
         "components":  {k: round(float(v), 4) for k, v in components.items()},
         "detections":  clean_dets,
-        "_dets_with_contour": dets,  # internal, stripped on serialise
+        "_dets_with_contour": dets,
     }
