@@ -46,8 +46,8 @@ def _read_prompts(path: str, limit: int) -> list:
 
 def _build_prompt(processor, text: str) -> str:
     conversation = [
-        {"role": "User", "content": text},
-        {"role": "Assistant", "content": ""},
+        {"role": "<|User|>", "content": text},
+        {"role": "<|Assistant|>", "content": ""},
     ]
     sft_format = processor.apply_sft_template_for_multi_turn_prompts(
         conversations=conversation,
@@ -133,10 +133,15 @@ def main():
 
     print("[janus_gen] Loading model...")
     processor = VLChatProcessor.from_pretrained(args.model_path)
+    from transformers import AutoConfig
+    config = AutoConfig.from_pretrained(args.model_path, trust_remote_code=True)
+    language_config = config.language_config
+    language_config._attn_implementation = 'eager'
     model: MultiModalityCausalLM = AutoModelForCausalLM.from_pretrained(
         args.model_path,
+        config=config,
         trust_remote_code=True,
-        dtype=torch.bfloat16,
+        torch_dtype=torch.bfloat16,
     ).cuda().eval()
     print("[janus_gen] Model loaded.")
 

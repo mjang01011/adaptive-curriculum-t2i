@@ -77,16 +77,20 @@ def main():
 
     print(f"[smoke_test] Loading model from {model_path} ...")
     processor = VLChatProcessor.from_pretrained(model_path)
+    from transformers import AutoConfig
+    config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+    config.language_config._attn_implementation = 'eager'
     model: MultiModalityCausalLM = AutoModelForCausalLM.from_pretrained(
         model_path,
+        config=config,
         trust_remote_code=True,
         torch_dtype=torch.bfloat16,
     ).cuda().eval()
     print("[smoke_test] Model loaded.")
 
     conversation = [
-        {"role": "User", "content": "A red cube and a blue sphere."},
-        {"role": "Assistant", "content": ""},
+        {"role": "<|User|>", "content": "A red cube and a blue sphere."},
+        {"role": "<|Assistant|>", "content": ""},
     ]
     sft_format = processor.apply_sft_template_for_multi_turn_prompts(
         conversations=conversation,

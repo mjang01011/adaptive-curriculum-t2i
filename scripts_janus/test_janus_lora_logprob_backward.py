@@ -35,8 +35,12 @@ TEMPERATURE = 1.0
 # ---------------------------------------------------------------------------
 print("=== A. Loading model ===")
 processor = VLChatProcessor.from_pretrained(MODEL_PATH)
+from transformers import AutoConfig
+_config = AutoConfig.from_pretrained(MODEL_PATH, trust_remote_code=True)
+_config.language_config._attn_implementation = 'eager'
 model: MultiModalityCausalLM = AutoModelForCausalLM.from_pretrained(
     MODEL_PATH,
+    config=_config,
     trust_remote_code=True,
     torch_dtype=torch.bfloat16,
 ).cuda()
@@ -94,8 +98,8 @@ print("\n=== D. Generate tokens + logprobs ===")
 
 test_prompt_text = "A red cube on the left and a blue sphere on the right."
 conversation = [
-    {"role": "User", "content": test_prompt_text},
-    {"role": "Assistant", "content": ""},
+    {"role": "<|User|>", "content": test_prompt_text},
+    {"role": "<|Assistant|>", "content": ""},
 ]
 sft_format = processor.apply_sft_template_for_multi_turn_prompts(
     conversations=conversation,
