@@ -49,7 +49,7 @@ echo "[compbench_1s] LORA_CKPT=${LORA_CKPT:-none}"
 echo "[compbench_1s] ROOT=${ROOT}"
 
 cd $PROJECT
-export PYTHONPATH=$PROJECT:$LLAMAGEN:$PYTHONPATH
+export PYTHONPATH=$PROJECT:$LLAMAGEN:${PYTHONPATH:-}
 
 declare -A PROMPT_FILES
 PROMPT_FILES[color]="${COMP}/examples/dataset/color_val.txt"
