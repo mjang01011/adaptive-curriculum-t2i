@@ -75,7 +75,7 @@ def main():
     parser.add_argument("--reward-mode",       default="pseudo_soft_grpo_target_heavy")
     parser.add_argument("--hard-reward-mode",  default="hard_target")
     parser.add_argument("--output-dir",        required=True)
-    parser.add_argument("--reward-model-path", default=None)
+    parser.add_argument("--reward-model-id", default="Qwen/Qwen3-VL-4B-Instruct")
     args = parser.parse_args()
 
     G = args.num_generations
@@ -107,7 +107,7 @@ def main():
     print(f"[bog] Loaded {len(items)} prompts from {split_file}")
 
     # ── load models ────────────────────────────────────────────────────
-    reward_model = VLMRewardModel(model_path=args.reward_model_path)
+    reward_model = VLMRewardModel(model_id=args.reward_model_id)
     wrapper = JanusProWrapper(
         model_path=args.model_path,
         cfg_weight=args.cfg_weight,

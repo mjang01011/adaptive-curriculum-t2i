@@ -145,7 +145,7 @@ def main():
     print(f"[train] bucket={bucket}  train={len(train_items)}  val={len(val_items)}")
 
     # ── load reward model ──────────────────────────────────────────────
-    reward_model = VLMRewardModel(model_path=getattr(cfg, "reward_model_path", None))
+    reward_model = VLMRewardModel(model_id=getattr(cfg, "reward_model_id", "Qwen/Qwen3-VL-4B-Instruct"))
     print("[train] Reward model loaded.")
 
     # ── load Janus with LoRA ───────────────────────────────────────────

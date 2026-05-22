@@ -42,8 +42,8 @@ def main():
     parser.add_argument("--cfg-weight",   type=float, default=5.0)
     parser.add_argument("--temperature",  type=float, default=1.0)
     parser.add_argument("--out",          required=True)
-    parser.add_argument("--reward-model-path", default=None,
-                        help="Path or HF name for Qwen VLM reward model")
+    parser.add_argument("--reward-model-id", default="Qwen/Qwen3-VL-4B-Instruct",
+                        help="HF model id for Qwen VLM reward model")
     args = parser.parse_args()
 
     # ── load data ──────────────────────────────────────────────────────
@@ -60,7 +60,7 @@ def main():
 
     # ── load reward model ──────────────────────────────────────────────
     from adaptive_curriculum.reward.vlm_reward import Qwen3VLRewardModel
-    reward_model = Qwen3VLRewardModel(model_path=args.reward_model_path)
+    reward_model = Qwen3VLRewardModel(model_id=args.reward_model_id)
     print("[probe] Reward model loaded.")
 
     # ── load Janus ─────────────────────────────────────────────────────
