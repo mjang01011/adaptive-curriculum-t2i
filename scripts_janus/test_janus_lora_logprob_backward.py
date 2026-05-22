@@ -94,8 +94,8 @@ print("\n=== D. Generate tokens + logprobs ===")
 
 test_prompt_text = "A red cube on the left and a blue sphere on the right."
 conversation = [
-    {"role": "<|User|>", "content": test_prompt_text},
-    {"role": "<|Assistant|>", "content": ""},
+    {"role": "User", "content": test_prompt_text},
+    {"role": "Assistant", "content": ""},
 ]
 sft_format = processor.apply_sft_template_for_multi_turn_prompts(
     conversations=conversation,

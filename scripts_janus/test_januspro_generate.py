@@ -85,8 +85,8 @@ def main():
     print("[smoke_test] Model loaded.")
 
     conversation = [
-        {"role": "<|User|>", "content": "A red cube and a blue sphere."},
-        {"role": "<|Assistant|>", "content": ""},
+        {"role": "User", "content": "A red cube and a blue sphere."},
+        {"role": "Assistant", "content": ""},
     ]
     sft_format = processor.apply_sft_template_for_multi_turn_prompts(
         conversations=conversation,

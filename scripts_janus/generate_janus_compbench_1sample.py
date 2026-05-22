@@ -46,8 +46,8 @@ def _read_prompts(path: str, limit: int) -> list:
 
 def _build_prompt(processor, text: str) -> str:
     conversation = [
-        {"role": "<|User|>", "content": text},
-        {"role": "<|Assistant|>", "content": ""},
+        {"role": "User", "content": text},
+        {"role": "Assistant", "content": ""},
     ]
     sft_format = processor.apply_sft_template_for_multi_turn_prompts(
         conversations=conversation,
