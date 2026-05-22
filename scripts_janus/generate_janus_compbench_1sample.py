@@ -136,7 +136,7 @@ def main():
     model: MultiModalityCausalLM = AutoModelForCausalLM.from_pretrained(
         args.model_path,
         trust_remote_code=True,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
     ).cuda().eval()
     print("[janus_gen] Model loaded.")
 
