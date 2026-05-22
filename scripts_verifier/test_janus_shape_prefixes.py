@@ -38,93 +38,6 @@ METADATA = {
     "relation": "left_of",
 }
 
-# ── Janus generation ──────────────────────────────────────────────────────────
-
-def generate_janus(prompt, model_path, seed=42):
-    from transformers import AutoConfig, AutoModelForCausalLM
-    from janus.models import MultiModalityCausalLM, VLChatProcessor
-
-    processor = VLChatProcessor.from_pretrained(model_path)
-    config    = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
-    config.language_config._attn_implementation = "eager"
-    model: MultiModalityCausalLM = AutoModelForCausalLM.from_pretrained(
-        model_path, language_config=config.language_config, trust_remote_code=True,
-    )
-    model = model.to(torch.bfloat16).cuda().eval()
-
-    conversation = [
-        {"role": "<|User|>",      "content": prompt},
-        {"role": "<|Assistant|>", "content": ""},
-    ]
-    sft_format = processor.apply_sft_template_for_multi_turn_prompts(
-        conversations=conversation,
-        sft_format=processor.sft_format,
-        system_prompt="",
-    )
-    prompt_str = sft_format + processor.image_start_tag
-
-    input_ids = processor.tokenizer.encode(prompt_str)
-    input_ids = torch.LongTensor(input_ids).unsqueeze(0).cuda()
-
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-
-    with torch.no_grad():
-        outputs = model.generate(
-            input_ids=input_ids,
-            max_new_tokens=576,
-            do_sample=True,
-            top_p=0.95,
-            temperature=1.0,
-        )
-
-    # decode image tokens → PIL
-    img_tokens = outputs[0][input_ids.shape[1]:]
-    dec = model.gen_vision_model.decode_code(
-        img_tokens.unsqueeze(0),
-        shape=[1, 8, 24, 24],
-    )
-    dec = dec.float().cpu().numpy().transpose(0, 2, 3, 1)
-    dec = np.clip((dec + 1) / 2 * 255, 0, 255).astype(np.uint8)
-    return Image.fromarray(dec[0])
-
-
-def generate_janus_cached(prompt, model, processor, seed=42):
-    """Use already-loaded model to avoid reloading for each prefix."""
-    conversation = [
-        {"role": "<|User|>",      "content": prompt},
-        {"role": "<|Assistant|>", "content": ""},
-    ]
-    sft_format = processor.apply_sft_template_for_multi_turn_prompts(
-        conversations=conversation,
-        sft_format=processor.sft_format,
-        system_prompt="",
-    )
-    prompt_str = sft_format + processor.image_start_tag
-    input_ids  = processor.tokenizer.encode(prompt_str)
-    input_ids  = torch.LongTensor(input_ids).unsqueeze(0).cuda()
-
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-
-    with torch.no_grad():
-        outputs = model.generate(
-            input_ids=input_ids,
-            max_new_tokens=576,
-            do_sample=True,
-            top_p=0.95,
-            temperature=1.0,
-        )
-
-    img_tokens = outputs[0][input_ids.shape[1]:]
-    dec = model.gen_vision_model.decode_code(
-        img_tokens.unsqueeze(0),
-        shape=[1, 8, 24, 24],
-    )
-    dec = dec.float().cpu().numpy().transpose(0, 2, 3, 1)
-    dec = np.clip((dec + 1) / 2 * 255, 0, 255).astype(np.uint8)
-    return Image.fromarray(dec[0])
-
 
 # ── verifier ──────────────────────────────────────────────────────────────────
 
@@ -188,25 +101,20 @@ def make_html(results, out_path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out-dir",    required=True)
-    parser.add_argument("--model-path", default="/viscam/u/jj277/janus_project/Janus")
+    parser.add_argument("--model-path", default="deepseek-ai/Janus-Pro-1B")
     parser.add_argument("--seed",       type=int, default=42)
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # load model once
-    print("[test] Loading Janus...")
-    from transformers import AutoConfig, AutoModelForCausalLM
-    from janus.models import MultiModalityCausalLM, VLChatProcessor
+    # load wrapper once (reused across all prefixes)
+    sys.path.insert(0, str(Path(__file__).parents[1]))
+    from scripts_janus.janus_wrapper import JanusProWrapper
 
-    processor = VLChatProcessor.from_pretrained(args.model_path)
-    config    = AutoConfig.from_pretrained(args.model_path, trust_remote_code=True)
-    config.language_config._attn_implementation = "eager"
-    model: MultiModalityCausalLM = AutoModelForCausalLM.from_pretrained(
-        args.model_path, language_config=config.language_config, trust_remote_code=True,
-    )
-    model = model.to(torch.bfloat16).cuda().eval()
+    print("[test] Loading Janus...")
+    wrapper = JanusProWrapper(model_path=args.model_path, cfg_weight=5.0, temperature=1.0)
+    _ = wrapper.model  # trigger load
     print("[test] Model loaded.\n")
 
     results = []
@@ -214,7 +122,8 @@ def main():
         full_prompt = prefix + BASE_PROMPT
         print(f"[{i+1}/{len(PREFIXES)}] Generating: \"{full_prompt}\"")
 
-        pil = generate_janus_cached(full_prompt, model, processor, seed=args.seed)
+        out = wrapper.generate_images([full_prompt], seeds=[args.seed])
+        pil = out["images"][0]
         pil.save(out_dir / f"prefix_{i}.png")
 
         result = score(pil)
