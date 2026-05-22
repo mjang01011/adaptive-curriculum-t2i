@@ -140,14 +140,23 @@ class JanusProWrapper:
         """
         Returns (tokens, attn_mask, uncond_tokens, uncond_mask) for CFG batch.
         All tensors: (B, max_len), left-padded.
-        With left-padding, hidden_states[:, -1, :] always gives last real token.
+        Unconditional prompt uses empty string, matching official Janus-Pro repo.
         """
         pad_id = self.processor.pad_id
         all_ids = [
             self.processor.tokenizer.encode(_build_prompt_str(self.processor, p))
             for p in prompts
         ]
-        max_len = max(len(ids) for ids in all_ids)
+        # unconditional: empty prompt string
+        uncond_ids_single = self.processor.tokenizer.encode(
+            _build_prompt_str(self.processor, "")
+        )
+
+        all_uncond_ids = [uncond_ids_single for _ in prompts]
+        max_len = max(
+            max(len(ids) for ids in all_ids),
+            len(uncond_ids_single),
+        )
         B = len(prompts)
 
         tokens = torch.full((B, max_len), pad_id, dtype=torch.int).cuda()
@@ -155,17 +164,15 @@ class JanusProWrapper:
         uncond_tokens = torch.full((B, max_len), pad_id, dtype=torch.int).cuda()
         uncond_mask = torch.zeros(B, max_len, dtype=torch.long).cuda()
 
-        for b, ids in enumerate(all_ids):
-            seq_len = len(ids)
-            offset = max_len - seq_len
+        for b, (ids, u_ids) in enumerate(zip(all_ids, all_uncond_ids)):
+            # conditional — right-align
+            offset = max_len - len(ids)
             tokens[b, offset:] = torch.tensor(ids, dtype=torch.int)
             attn_mask[b, offset:] = 1
-            # unconditional: keep first and last real token, pad interior
-            uncond_tokens[b, offset] = ids[0]
-            if seq_len > 2:
-                uncond_tokens[b, offset + 1: offset + seq_len - 1] = pad_id
-            uncond_tokens[b, offset + seq_len - 1] = ids[-1]
-            uncond_mask[b, offset:] = 1
+            # unconditional — right-align
+            u_offset = max_len - len(u_ids)
+            uncond_tokens[b, u_offset:] = torch.tensor(u_ids, dtype=torch.int)
+            uncond_mask[b, u_offset:] = 1
 
         return tokens, attn_mask, uncond_tokens, uncond_mask, max_len, all_ids
 
@@ -192,55 +199,114 @@ class JanusProWrapper:
         return_logprobs: bool = False,
     ) -> dict:
         """
-        Generate one image per prompt (batched).
-        Returns dict with keys: images, generated_tokens (opt), token_logprobs (opt).
+        Generate one image per prompt.
+        When len(prompts) == 1: single-prompt batched path (fast, matches official style).
+        When len(prompts) > 1: sequential per-prompt to avoid left-padding KV cache issues.
+        Seeds are respected per-prompt in sequential mode.
         """
-        cfg_weight = cfg_weight if cfg_weight is not None else self.cfg_weight
+        cfg_weight  = cfg_weight  if cfg_weight  is not None else self.cfg_weight
         temperature = temperature if temperature is not None else self.temperature
         model = self.model
         model.eval()
         B = len(prompts)
 
         if seeds is not None:
-            assert len(seeds) == B
-            # set seed to first seed (per-image seeding would require sequential generation)
-            torch.manual_seed(seeds[0])
-            torch.cuda.manual_seed(seeds[0])
+            assert len(seeds) == B, f"Expected {B} seeds, got {len(seeds)}"
 
-        tokens, attn_mask, uncond_tokens, uncond_mask, max_len, _ = self._tokenize_and_pad(prompts)
+        if B > 1:
+            # sequential: one prompt at a time to avoid left-padding KV cache corruption
+            all_images, all_tokens, all_lp = [], [], []
+            for idx, prompt in enumerate(prompts):
+                seed = seeds[idx] if seeds is not None else None
+                out = self._generate_single(
+                    prompt, seed=seed, cfg_weight=cfg_weight, temperature=temperature,
+                    return_tokens=return_tokens, return_logprobs=return_logprobs,
+                )
+                all_images.append(out["images"][0])
+                if return_tokens:
+                    all_tokens.append(out["generated_tokens"])
+                if return_logprobs:
+                    all_lp.append(out["token_logprobs"])
+            result = {"images": all_images}
+            if return_tokens:
+                result["generated_tokens"] = torch.cat(all_tokens, dim=0)
+            if return_logprobs:
+                result["token_logprobs"] = torch.cat(all_lp, dim=0)
+            return result
 
-        # CFG interleaved batch: (2B, max_len)
+        # single-prompt fast path
+        seed = seeds[0] if seeds is not None else None
+        return self._generate_single(
+            prompts[0], seed=seed, cfg_weight=cfg_weight, temperature=temperature,
+            return_tokens=return_tokens, return_logprobs=return_logprobs,
+        )
+
+    @torch.no_grad()
+    def _generate_single(
+        self,
+        prompt: str,
+        seed: Optional[int] = None,
+        cfg_weight: Optional[float] = None,
+        temperature: Optional[float] = None,
+        return_tokens: bool = False,
+        return_logprobs: bool = False,
+    ) -> dict:
+        """Generate one image for one prompt. No batching, no padding ambiguity."""
+        cfg_weight  = cfg_weight  if cfg_weight  is not None else self.cfg_weight
+        temperature = temperature if temperature is not None else self.temperature
+        model = self.model
+
+        if seed is not None:
+            torch.manual_seed(seed)
+            torch.cuda.manual_seed(seed)
+
+        tokens, attn_mask, uncond_tokens, uncond_mask, max_len, _ = self._tokenize_and_pad([prompt])
+
+        # CFG interleaved batch: (2, max_len)
         cfg_tokens = self._interleave(tokens, uncond_tokens)
-        cfg_mask = self._interleave(attn_mask, uncond_mask)
+        cfg_mask   = self._interleave(attn_mask, uncond_mask)
 
-        inputs_embeds = model.language_model.get_input_embeddings()(cfg_tokens)
-        generated_tokens = torch.zeros((B, self.image_token_num), dtype=torch.int).cuda()
-        all_logprobs = [] if return_logprobs else None
+        inputs_embeds   = model.language_model.get_input_embeddings()(cfg_tokens)
+        generated_tokens = torch.zeros((1, self.image_token_num), dtype=torch.int).cuda()
+        all_logprobs     = [] if return_logprobs else None
 
-        pkv = None
+        pkv              = None
+        past_attn_mask   = cfg_mask   # grows by 1 each step
+
         for i in range(self.image_token_num):
-            kwargs = dict(inputs_embeds=inputs_embeds, use_cache=True, past_key_values=pkv)
-            if pkv is None:
-                kwargs["attention_mask"] = cfg_mask
-            outputs = model.language_model.model(**kwargs)
-            pkv = outputs.past_key_values
+            outputs = model.language_model.model(
+                inputs_embeds=inputs_embeds,
+                attention_mask=past_attn_mask,
+                use_cache=True,
+                past_key_values=pkv,
+            )
+            pkv    = outputs.past_key_values
             hidden = outputs.last_hidden_state
-            logits = model.gen_head(hidden[:, -1, :])          # (2B, vocab)
-            logit_cond   = logits[0::2, :]                      # (B, vocab)
-            logit_uncond = logits[1::2, :]                      # (B, vocab)
-            logits_cfg = logit_uncond + cfg_weight * (logit_cond - logit_uncond)
+            logits = model.gen_head(hidden[:, -1, :])   # (2, vocab)
 
-            probs = torch.softmax(logits_cfg / temperature, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)  # (B, 1)
+            logit_cond   = logits[0:1, :]
+            logit_uncond = logits[1:2, :]
+            logits_cfg   = logit_uncond + cfg_weight * (logit_cond - logit_uncond)
+
+            probs      = torch.softmax(logits_cfg / temperature, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)   # (1, 1)
             generated_tokens[:, i] = next_token.squeeze(-1)
 
             if return_logprobs:
                 lp = torch.log_softmax(logits_cfg / temperature, dim=-1)
-                all_logprobs.append(lp.gather(1, next_token))    # (B, 1)
+                all_logprobs.append(lp.gather(1, next_token))
 
-            next_paired = torch.cat([next_token, next_token], dim=1).view(-1)  # (2B,)
-            img_embeds = model.prepare_gen_img_embeds(next_paired)
-            inputs_embeds = img_embeds.unsqueeze(1)
+            next_paired  = next_token.expand(2, 1).reshape(-1)     # (2,)
+            img_embeds   = model.prepare_gen_img_embeds(next_paired)
+            inputs_embeds = img_embeds.unsqueeze(1)                 # (2, 1, D)
+
+            # extend attention mask by 1 for the newly generated token
+            past_attn_mask = torch.cat([
+                past_attn_mask,
+                torch.ones(past_attn_mask.size(0), 1,
+                           dtype=past_attn_mask.dtype,
+                           device=past_attn_mask.device),
+            ], dim=1)
 
         images = _decode_to_pil(model, generated_tokens, self.img_size, self.patch_size)
 
