@@ -78,6 +78,8 @@ def main():
     # output
     parser.add_argument("--output-dir",     required=True)
     parser.add_argument("--wandb-project",  default=None)
+    parser.add_argument("--warmstart-pairs-jsonl", default=None,
+                        help="Skip round 1 pair generation and use this pairs.jsonl instead.")
     args = parser.parse_args()
 
     out_dir = Path(args.output_dir)
@@ -113,36 +115,43 @@ def main():
         print(f"{'━'*70}")
 
         # ── pair generation ───────────────────────────────────────────────────
-        gen_cmd = [
-            sys.executable,
-            str(_REPO / "scripts_janus" / "generate_and_score_llamagen_pairs_g2.py"),
-            "--input-jsonl",  args.train_jsonl,
-            "--output-dir",   str(pair_dir),
-            "--num-prompts",  str(args.num_prompts),
-            "--seeds",        str(seed_a), str(seed_b),
-            "--repo-root",    args.repo_root,
-            "--gpt-ckpt",     args.gpt_ckpt,
-            "--vq-ckpt",      args.vq_ckpt,
-            "--t5-path",      args.t5_path,
-            "--cfg-scale",    str(args.cfg_scale),
-            "--reward-mode",  args.reward_mode,
-            "--save-tokens",
-        ]
-        if prev_ckpt:
-            gen_cmd += [
-                "--init-checkpoint",     str(prev_ckpt),
-                "--lora-r",              str(args.lora_r),
-                "--lora-alpha",          str(args.lora_alpha),
-                "--lora-target-modules", *args.lora_target_modules,
+        if r == 0 and args.warmstart_pairs_jsonl:
+            # reuse pre-existing pairs for round 1 — skip generation
+            pair_dir = Path(args.warmstart_pairs_jsonl).parent
+            print(f"\n  [round 1] warmstart — skipping pair gen, using {pair_dir}")
+        else:
+            gen_cmd = [
+                sys.executable,
+                str(_REPO / "scripts_janus" / "generate_and_score_llamagen_pairs_g2.py"),
+                "--input-jsonl",  args.train_jsonl,
+                "--output-dir",   str(pair_dir),
+                "--num-prompts",  str(args.num_prompts),
+                "--seeds",        str(seed_a), str(seed_b),
+                "--repo-root",    args.repo_root,
+                "--gpt-ckpt",     args.gpt_ckpt,
+                "--vq-ckpt",      args.vq_ckpt,
+                "--t5-path",      args.t5_path,
+                "--cfg-scale",    str(args.cfg_scale),
+                "--reward-mode",  args.reward_mode,
+                "--save-tokens",
             ]
-
-        run(gen_cmd, f"Round {r+1} — pair generation")
+            if prev_ckpt:
+                gen_cmd += [
+                    "--init-checkpoint",     str(prev_ckpt),
+                    "--lora-r",              str(args.lora_r),
+                    "--lora-alpha",          str(args.lora_alpha),
+                    "--lora-target-modules", *args.lora_target_modules,
+                ]
+            run(gen_cmd, f"Round {r+1} — pair generation")
 
         # ── DPO training ──────────────────────────────────────────────────────
+        pairs_jsonl = (args.warmstart_pairs_jsonl
+                       if r == 0 and args.warmstart_pairs_jsonl
+                       else str(pair_dir / "pairs.jsonl"))
         train_cmd = [
             sys.executable,
             str(_REPO / "scripts" / "train_llamagen_dpo_from_pairs.py"),
-            "--pairs-jsonl",       str(pair_dir / "pairs.jsonl"),
+            "--pairs-jsonl",       pairs_jsonl,
             "--val-jsonl",         args.val_jsonl,
             "--output-dir",        str(dpo_dir),
             "--repo-root",         args.repo_root,
@@ -182,7 +191,7 @@ def main():
             })
         round_summary.append(round_info)
 
-        prev_ckpt = dpo_dir / "best_checkpoint.pt"
+        prev_ckpt = dpo_dir / "final_checkpoint.pt"
         print(f"\n  [round {r+1}] best_val_r={round_info.get('best_val_reward', '?')}  "
               f"delta={round_info.get('delta_reward', '?')}  "
               f"next init → {prev_ckpt}")
