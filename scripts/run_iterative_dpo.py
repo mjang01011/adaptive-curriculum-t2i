@@ -191,7 +191,7 @@ def main():
             })
         round_summary.append(round_info)
 
-        prev_ckpt = dpo_dir / "final_checkpoint.pt"
+        prev_ckpt = dpo_dir / "best_checkpoint.pt"
         print(f"\n  [round {r+1}] best_val_r={round_info.get('best_val_reward', '?')}  "
               f"delta={round_info.get('delta_reward', '?')}  "
               f"next init → {prev_ckpt}")
