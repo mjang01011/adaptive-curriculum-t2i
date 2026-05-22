@@ -210,10 +210,66 @@ h1{{color:#7cf}} table{{border-collapse:collapse}} td,th{{border:1px solid #333;
 
     print(f"  [eval step={step}] mean_r={mean_r:.4f}  se={se:.4f}  "
           + "  ".join(f"{k}={v:.3f}" for k, v in comp_means.items()))
+
     if wandb_run:
-        wandb_run.log({"val/mean_reward": mean_r, "val/se": se,
-                       **{f"val/{k}": v for k, v in comp_means.items()},
-                       "step": step})
+        import wandb as _wandb
+
+        # ── scalar metrics ────────────────────────────────────────────────────
+        log_dict = {
+            "val/mean_reward": mean_r,
+            "val/se":          se,
+            "step":            step,
+        }
+        # per-component (overall + per-bucket)
+        for k, v in comp_means.items():
+            log_dict[f"val/comp/{k}"] = v
+
+        # per-bucket mean reward
+        for bucket, items in val_items_by_bucket.items():
+            bkt_rewards = [s["reward"] for s in scores_rows if s["bucket"] == bucket]
+            if bkt_rewards:
+                log_dict[f"val/bucket/{bucket}/mean_reward"] = float(np.mean(bkt_rewards))
+                for k in comp_means:
+                    bkt_comp = [s["components"].get(k, 0) for s in scores_rows
+                                if s["bucket"] == bucket]
+                    if bkt_comp:
+                        log_dict[f"val/bucket/{bucket}/{k}"] = float(np.mean(bkt_comp))
+
+        # ── image progression panels ──────────────────────────────────────────
+        # Log each fixed val prompt as a wandb.Image so you can scrub through
+        # steps in the Media panel and see how images change over training.
+        # Key format: "val_images/<bucket>/<item_id>/seed<s>"
+        # wandb stacks same key across steps → progression view.
+        for bucket, items in val_items_by_bucket.items():
+            for item in items:
+                for seed in val_seeds:
+                    cur = new_images.get((item.id, seed))
+                    if cur is None:
+                        continue
+                    cur_r = next((s["reward"] for s in scores_rows
+                                  if s["id"] == item.id and s["seed"] == seed), 0)
+                    base  = base_images.get((item.id, seed)) if base_images else None
+
+                    caption = f"step={step}  r={cur_r:.3f}  {item.text[:60]}"
+
+                    if base and step > 0:
+                        # side-by-side: paste base | current into one image
+                        from PIL import Image as _PIL, ImageDraw as _Draw
+                        W, H = cur.width, cur.height
+                        combined = _PIL.new("RGB", (W * 2 + 4, H + 20), (17, 17, 17))
+                        combined.paste(base, (0, 20))
+                        combined.paste(cur,  (W + 4, 20))
+                        draw = _Draw.Draw(combined)
+                        draw.text((2,  2), "base",        fill=(150, 150, 150))
+                        draw.text((W + 6, 2), f"step {step}", fill=(100, 220, 100))
+                        img_to_log = combined
+                    else:
+                        img_to_log = cur
+
+                    key = f"val_images/{bucket}/{item.id}/seed{seed}"
+                    log_dict[key] = _wandb.Image(img_to_log, caption=caption)
+
+        wandb_run.log(log_dict)
 
     return mean_r, comp_means, new_images
 
