@@ -32,8 +32,6 @@ try:
 except ImportError:
     raise ImportError("pip install opencv-python-headless")
 
-# ── add project root to path ──────────────────────────────────────────────────
-
 _ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(_ROOT))
 
@@ -49,7 +47,7 @@ class ShapeDataItem:
     id:       str
     text:     str
     bucket:   str
-    objects:  list   # [{color, shape/family, position}, ...]
+    objects:  list
     relation: str
 
     def to_metadata(self):
@@ -79,20 +77,10 @@ def load_shape_dataset(jsonl_path: str, bucket: str = "synthetic_shapes") -> Lis
 # ══════════════════════════════════════════════════════════════════════════════
 
 class ShapeVerifierRewardModel:
-    """Wraps the classical CV verifier; accepts PIL images (no disk I/O)."""
-
     def score_pil(self, pil_img, item: ShapeDataItem) -> dict:
-        import numpy as np
         rgb = np.array(pil_img.convert("RGB"), dtype=np.uint8)
         bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
         return verify_image_bgr(bgr, item.to_metadata())
-
-    def score_batch(self, pil_imgs: list, items: List[ShapeDataItem]) -> torch.Tensor:
-        rewards = []
-        for img, item in zip(pil_imgs, items):
-            result = self.score_pil(img, item)
-            rewards.append(result["reward"])
-        return torch.tensor(rewards, dtype=torch.float32)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -100,10 +88,6 @@ class ShapeVerifierRewardModel:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _compute_per_token_lp_and_entropy(wrapper, tokens, c_indices, c_emb_masks):
-    """
-    Single forward pass → per-token log probs and per-token Shannon entropy.
-    Returns (token_lp, entropy) both shape (B, seq_len), with grad on token_lp.
-    """
     import torch.nn as _nn
     wrapper.gpt.train()
     saved_uncond_prob = wrapper.gpt.cls_embedding.uncond_prob
@@ -117,20 +101,14 @@ def _compute_per_token_lp_and_entropy(wrapper, tokens, c_indices, c_emb_masks):
         logits, _ = wrapper.gpt(
             idx=tokens_long[:, :-1],
             cond_idx=c_cast,
-            input_pos=None,
-            targets=None,
-            mask=None,
-            valid=None,
+            input_pos=None, targets=None, mask=None, valid=None,
         )
         logits = logits.float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
-        log_p = F.log_softmax(logits, dim=-1)                      # (B, L, V)
-        token_lp = log_p.gather(-1, tokens_long.unsqueeze(-1)).squeeze(-1)  # (B, L)
-        token_lp = token_lp.clamp(min=-20.0)
-
+        log_p    = F.log_softmax(logits, dim=-1)
+        token_lp = log_p.gather(-1, tokens_long.unsqueeze(-1)).squeeze(-1).clamp(min=-20.0)
         with torch.no_grad():
-            p = log_p.exp()
-            entropy = -(p * log_p).sum(dim=-1)                     # (B, L)
-
+            p       = log_p.exp()
+            entropy = -(p * log_p).sum(dim=-1)
         return token_lp, entropy
     finally:
         wrapper.gpt.cls_embedding.uncond_prob = saved_uncond_prob
@@ -139,94 +117,57 @@ def _compute_per_token_lp_and_entropy(wrapper, tokens, c_indices, c_emb_masks):
 
 
 def build_gcpo_lite_weights(entropy: torch.Tensor, latent_size: int, alpha: float = 2.0) -> torch.Tensor:
-    """
-    Compute per-token importance weights from per-token entropy.
-
-    Tokens with high spatial entropy-gradient (object boundaries) are upweighted.
-    Also apply a mild positional decay to emphasize early (coarse layout) tokens.
-
-    entropy: (B, seq_len)  seq_len = latent_size^2
-    Returns: (B, seq_len) weights ≥ 1
-    """
     B, L = entropy.shape
-    assert L == latent_size * latent_size, f"expected {latent_size**2} tokens, got {L}"
-
-    grid = entropy.reshape(B, latent_size, latent_size)
-
-    # finite-difference gradient magnitude in 2D spatial grid
-    dy = grid[:, 1:, :] - grid[:, :-1, :]   # (B, ls-1, ls)
-    dx = grid[:, :, 1:] - grid[:, :, :-1]   # (B, ls, ls-1)
-    # zero-pad to restore shape
-    dy = F.pad(dy, (0, 0, 0, 1))            # (B, ls, ls)
-    dx = F.pad(dx, (0, 1, 0, 0))            # (B, ls, ls)
-    grad_mag = (dx ** 2 + dy ** 2).sqrt()   # (B, ls, ls)
-    grad_flat = grad_mag.reshape(B, L)
-
-    # normalize per sequence to [0, 1]
-    gmin = grad_flat.min(dim=1, keepdim=True).values
-    gmax = grad_flat.max(dim=1, keepdim=True).values
+    grid    = entropy.reshape(B, latent_size, latent_size)
+    dy      = F.pad(grid[:, 1:, :] - grid[:, :-1, :], (0, 0, 0, 1))
+    dx      = F.pad(grid[:, :, 1:] - grid[:, :, :-1], (0, 1, 0, 0))
+    grad_flat = (dx**2 + dy**2).sqrt().reshape(B, L)
+    gmin    = grad_flat.min(dim=1, keepdim=True).values
+    gmax    = grad_flat.max(dim=1, keepdim=True).values
     grad_norm = (grad_flat - gmin) / (gmax - gmin + 1e-6)
-
-    # boundary weight
-    weights = 1.0 + alpha * grad_norm       # (B, L)
-
-    # mild early-token boost: positional factor decays with sqrt(pos)
-    pos = torch.arange(L, device=entropy.device, dtype=entropy.dtype)
-    pos_w = (L / (pos + 1)).sqrt()          # large for early tokens
-    pos_w = pos_w / pos_w.mean()            # mean = 1
+    weights = 1.0 + alpha * grad_norm
+    pos     = torch.arange(L, device=entropy.device, dtype=entropy.dtype)
+    pos_w   = (L / (pos + 1)).sqrt()
+    pos_w   = pos_w / pos_w.mean()
     weights = weights * pos_w.unsqueeze(0)
-
-    # renormalize so mean = 1 per sequence
-    weights = weights / weights.mean(dim=1, keepdim=True)
-    return weights.detach()
+    return (weights / weights.mean(dim=1, keepdim=True)).detach()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Training step
+# One GRPO step
 # ══════════════════════════════════════════════════════════════════════════════
 
-def grpo_step(wrapper, reward_model, batch, cfg, global_step, wandb_run=None):
-    """
-    One GRPO update step.  Returns metrics dict.
-    objective: standard_grpo | winner_only | winner_only_gcpo_lite
-    """
+def grpo_step(wrapper, reward_model, batch, cfg, global_step):
     from autoregressive.models.generate import generate
     import torchvision.transforms.functional as TF
 
-    objective   = cfg.training.objective
-    G           = cfg.training.num_samples          # samples per prompt
-    beta        = cfg.training.beta
-    margin_thr  = cfg.training.get("margin_threshold", 0.05)
-    gcpo_alpha  = cfg.training.get("gcpo_alpha", 2.0)
-    grad_accum  = cfg.training.get("grad_accum_steps", 1)
-    adv_eps     = cfg.training.get("advantage_eps", 1e-8)
+    objective  = cfg.training.objective
+    G          = cfg.training.num_samples
+    beta       = cfg.training.beta
+    margin_thr = cfg.training.get("margin_threshold", 0.05)
+    gcpo_alpha = cfg.training.get("gcpo_alpha", 2.0)
+    adv_eps    = cfg.training.get("advantage_eps", 1e-8)
+    B          = len(batch)
 
-    B = len(batch)
-
-    # ── 1. conditioning ───────────────────────────────────────────────────────
+    # ── conditioning ──────────────────────────────────────────────────────────
     with torch.no_grad():
         c_indices, c_emb_masks = wrapper._get_conditioning(batch, t5_cache=None)
 
-    # ── 2. generate G samples per prompt (no grad) ────────────────────────────
+    # ── generate G samples per prompt ─────────────────────────────────────────
     wrapper.gpt.eval()
-    all_tokens = []   # list of G tensors each (B, seq_len)
-    all_pil    = []   # list of G lists each [B PIL images]
+    all_tokens = []
+    all_pil    = []
     qzshape    = [B, wrapper.codebook_embed_dim, wrapper.latent_size, wrapper.latent_size]
 
     with torch.no_grad():
-        for _ in range(G):
-            idx_sample = generate(
-                wrapper.gpt, c_indices, wrapper.latent_size ** 2,
-                c_emb_masks,
-                cfg_scale=wrapper.cfg_scale_train,
-                temperature=wrapper.temperature,
-                top_k=wrapper.top_k,
-                top_p=wrapper.top_p,
-                sample_logits=True,
-            )  # (B, seq_len)
-            all_tokens.append(idx_sample)
-
-            decoded = wrapper.vq_model.decode_code(idx_sample, qzshape)
+        for g in range(G):
+            idx = generate(
+                wrapper.gpt, c_indices, wrapper.latent_size ** 2, c_emb_masks,
+                cfg_scale=wrapper.cfg_scale_train, temperature=wrapper.temperature,
+                top_k=wrapper.top_k, top_p=wrapper.top_p, sample_logits=True,
+            )
+            all_tokens.append(idx)
+            decoded   = wrapper.vq_model.decode_code(idx, qzshape)
             pil_batch = []
             for i in range(B):
                 img_t = (decoded[i].float().clamp(-1, 1) + 1) / 2
@@ -235,80 +176,72 @@ def grpo_step(wrapper, reward_model, batch, cfg, global_step, wandb_run=None):
 
     wrapper._disable_kv_cache()
 
-    # ── 3. score all samples ─────────────────────────────────────────────────
-    # rewards[b, g] = reward for prompt b, sample g
+    # ── score ─────────────────────────────────────────────────────────────────
     rewards = torch.zeros(B, G)
-    reward_details = []
+    comp_log = []
     for g in range(G):
         for b, item in enumerate(batch):
-            result = reward_model.score_pil(all_pil[g][b], item)
-            rewards[b, g] = result["reward"]
-            reward_details.append({
-                "id": item.id, "g": g, "reward": result["reward"],
-                "components": result.get("components", {}),
-            })
+            result         = reward_model.score_pil(all_pil[g][b], item)
+            rewards[b, g]  = result["reward"]
+            comp_log.append({"id": item.id, "g": g, "reward": result["reward"],
+                              "components": result.get("components", {})})
 
-    # ── 4. compute advantages ─────────────────────────────────────────────────
-    mean_r = rewards.mean(dim=1, keepdim=True)    # (B, 1)
+    # ── advantages ────────────────────────────────────────────────────────────
+    mean_r = rewards.mean(dim=1, keepdim=True)
     std_r  = rewards.std(dim=1, keepdim=True) + adv_eps
-    norm_adv = ((rewards - mean_r) / std_r).nan_to_num(nan=0.0)  # (B, G)
+    norm_adv = ((rewards - mean_r) / std_r).nan_to_num(nan=0.0)
 
     if "winner_only" in objective:
-        # only the winner sample gets a non-zero advantage
-        winner_mask = torch.zeros_like(rewards)
-        best_g = rewards.argmax(dim=1)  # (B,)
+        advantages   = torch.zeros_like(rewards)
+        best_g       = rewards.argmax(dim=1)
+        n_winners    = 0
         for b in range(B):
-            max_r = rewards[b, best_g[b]].item()
-            # skip if winner barely beats the group mean (noise-dominated)
-            if max_r - mean_r[b, 0].item() >= margin_thr:
-                winner_mask[b, best_g[b]] = 1.0
-        advantages = winner_mask  # use raw 1.0 for winner (not normalized)
+            if rewards[b, best_g[b]].item() - mean_r[b, 0].item() >= margin_thr:
+                advantages[b, best_g[b]] = 1.0
+                n_winners += 1
     else:
-        advantages = norm_adv  # (B, G)
+        advantages = norm_adv
+        n_winners  = B
 
-    # ── 5. stack tokens: (B*G, seq_len) ──────────────────────────────────────
-    stacked_tokens = torch.stack(all_tokens, dim=1).reshape(B * G, -1)  # (B*G, seq_len)
+    # ── stacked tokens ────────────────────────────────────────────────────────
+    stacked_tokens = torch.stack(all_tokens, dim=1).reshape(B * G, -1)
     rep_c    = c_indices.repeat_interleave(G, dim=0)
     rep_mask = c_emb_masks.repeat_interleave(G, dim=0)
-    flat_adv = advantages.reshape(-1).to(wrapper.device)  # (B*G,)
+    flat_adv = advantages.reshape(-1).to(wrapper.device)
 
-    # ── 6. reference log probs (KL regularisation) ───────────────────────────
     wrapper.gpt.float()
+
+    # ── reference log probs ───────────────────────────────────────────────────
     ref_lp = None
     if beta > 0.0:
         with torch.no_grad():
             ref_lp = wrapper._compute_log_probs_ref(stacked_tokens, rep_c, rep_mask, cfg_scale=1.0)
 
-    # ── 7. policy gradient loss ───────────────────────────────────────────────
+    # ── policy gradient ───────────────────────────────────────────────────────
     wrapper._optimizer.zero_grad()
-    total_pg   = 0.0
-    total_kl   = 0.0
-    chunk_size = B  # one prompt worth at a time to avoid OOM
+    total_pg = 0.0
+    total_kl = 0.0
+    chunk    = B
 
-    for start in range(0, B * G, chunk_size):
-        end      = min(start + chunk_size, B * G)
-        c_tok    = stacked_tokens[start:end]
-        c_cond   = rep_c[start:end]
-        c_msk    = rep_mask[start:end]
-        c_adv    = flat_adv[start:end]
-        weight   = (end - start) / (B * G)
+    for start in range(0, B * G, chunk):
+        end    = min(start + chunk, B * G)
+        c_tok  = stacked_tokens[start:end]
+        c_cond = rep_c[start:end]
+        c_msk  = rep_mask[start:end]
+        c_adv  = flat_adv[start:end]
+        w      = (end - start) / (B * G)
 
         if objective == "winner_only_gcpo_lite":
-            # per-token log probs + entropy in a single forward pass
-            tok_lp, entropy = _compute_per_token_lp_and_entropy(
-                wrapper, c_tok, c_cond, c_msk
-            )
-            gcpo_w = build_gcpo_lite_weights(
-                entropy, wrapper.latent_size, alpha=gcpo_alpha
-            )  # (chunk, seq_len)
-            seq_lp = (tok_lp * gcpo_w).sum(dim=-1) / math.sqrt(tok_lp.shape[-1])
+            tok_lp, entropy = _compute_per_token_lp_and_entropy(wrapper, c_tok, c_cond, c_msk)
+            gcpo_w  = build_gcpo_lite_weights(entropy, wrapper.latent_size, alpha=gcpo_alpha)
+            seq_lp  = (tok_lp * gcpo_w).sum(dim=-1) / math.sqrt(tok_lp.shape[-1])
         else:
             seq_lp = wrapper._compute_log_probs(c_tok, c_cond, c_msk, cfg_scale=1.0)
 
-        pg = -(c_adv * seq_lp).mean() * weight
+        pg = -(c_adv * seq_lp).mean() * w
 
         if beta > 0.0 and ref_lp is not None:
-            kl_chunk  = (seq_lp - ref_lp[start:end]).mean() * weight
+            kl_chunk  = (seq_lp - ref_lp[start:end]).mean() * w
             chunk_loss = pg + beta * kl_chunk
             total_kl  += kl_chunk.item()
         else:
@@ -317,7 +250,6 @@ def grpo_step(wrapper, reward_model, batch, cfg, global_step, wandb_run=None):
         chunk_loss.backward()
         total_pg += pg.item()
 
-        # sanitise NaN grads immediately (cumulative NaN propagation)
         for p in wrapper.gpt.parameters():
             if p.requires_grad and p.grad is not None:
                 p.grad.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
@@ -329,74 +261,157 @@ def grpo_step(wrapper, reward_model, batch, cfg, global_step, wandb_run=None):
     wrapper._optimizer.step()
     wrapper._step += 1
 
+    # per-component mean for logging
+    comp_means = {}
+    if comp_log:
+        keys = list(comp_log[0]["components"].keys())
+        for k in keys:
+            vals = [c["components"].get(k, 0.0) for c in comp_log]
+            comp_means[k] = float(np.mean(vals))
+
     metrics = {
-        "step":          global_step,
-        "pg_loss":       total_pg,
-        "kl_loss":       total_kl,
-        "total_loss":    total_pg + beta * total_kl,
-        "grad_norm":     grad_norm,
-        "mean_reward":   float(rewards.mean()),
-        "max_reward":    float(rewards.max()),
-        "min_reward":    float(rewards.min()),
-        "mean_adv":      float(advantages.mean()),
-        "lr":            wrapper._optimizer.param_groups[0]["lr"],
+        "step":       global_step,
+        "pg_loss":    total_pg,
+        "kl_loss":    total_kl,
+        "grad_norm":  grad_norm,
+        "mean_reward": float(rewards.mean()),
+        "max_reward":  float(rewards.max()),
+        "min_reward":  float(rewards.min()),
+        "reward_std":  float(rewards.std()),
+        "n_winners":   n_winners,
+        "lr":          wrapper._optimizer.param_groups[0]["lr"],
+        **{f"comp/{k}": v for k, v in comp_means.items()},
     }
-    return metrics, reward_details
+    return metrics, comp_log
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Probe evaluation
+# Mini-probe — 4 fixed val prompts, runs every step, saves images
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run_probe(wrapper, reward_model, val_items, cfg, step, out_dir, wandb_run=None):
-    """
-    Generate 1 image per val prompt, score, log summary.
-    Returns mean_reward and mean_relation.
+def run_mini_probe(wrapper, reward_model, items, step, out_dir):
+    """Generate + score + save images for a fixed small set of val prompts.
+    Same cost as one training batch. Images go to mini_probe/<item_id>/stepXXXX.png
+    so you can open a folder and scroll through to watch the model change.
     """
     from autoregressive.models.generate import generate
     import torchvision.transforms.functional as TF
 
-    probe_bs = cfg.training.get("probe_batch_size", 4)
     wrapper.gpt.eval()
+    B       = len(items)
+    qzshape = [B, wrapper.codebook_embed_dim, wrapper.latent_size, wrapper.latent_size]
 
+    with torch.no_grad():
+        c_idx, c_msk = wrapper._get_conditioning(items, t5_cache=None)
+        tokens = generate(
+            wrapper.gpt, c_idx, wrapper.latent_size ** 2, c_msk,
+            cfg_scale=wrapper.cfg_scale, temperature=wrapper.temperature,
+            top_k=wrapper.top_k, top_p=wrapper.top_p, sample_logits=True,
+        )
+        wrapper._disable_kv_cache()
+        decoded = wrapper.vq_model.decode_code(tokens, qzshape)
+
+    scores = []
+    for i, item in enumerate(items):
+        img_t = (decoded[i].float().clamp(-1, 1) + 1) / 2
+        pil   = TF.to_pil_image(img_t.cpu())
+
+        # save to mini_probe/<item_id>/step_XXXX.png
+        img_dir = Path(out_dir) / "mini_probe" / item.id
+        img_dir.mkdir(parents=True, exist_ok=True)
+
+        # write prompt once so you always know what the folder is about
+        prompt_file = img_dir / "prompt.txt"
+        if not prompt_file.exists():
+            prompt_file.write_text(item.text, encoding="utf-8")
+
+        pil.save(img_dir / f"step_{step:04d}.png")
+
+        result = reward_model.score_pil(pil, item)
+        scores.append(result["reward"])
+        rel    = result.get("components", {}).get("relation", 0.0)
+        print(f"    [mini] {item.id}  r={result['reward']:.3f}  rel={rel:.3f}  → {item.text[:50]}")
+
+    print(f"    [mini] mean={float(np.mean(scores)):.3f}  step={step}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Probe evaluation — generates + saves images
+# ══════════════════════════════════════════════════════════════════════════════
+
+def run_probe(wrapper, reward_model, val_items, cfg, step, out_dir, wandb_run=None):
+    from autoregressive.models.generate import generate
+    import torchvision.transforms.functional as TF
+
+    probe_bs  = cfg.training.get("probe_batch_size", 8)
+    n_save    = cfg.training.get("probe_save_images", 20)  # save first N val images
+
+    img_dir   = Path(out_dir) / f"probe_step_{step:04d}"
+    img_dir.mkdir(parents=True, exist_ok=True)
+
+    wrapper.gpt.eval()
     all_rewards   = []
-    all_relations = []
+    all_comp      = {}
+    saved         = 0
 
     with torch.no_grad():
         for start in range(0, len(val_items), probe_bs):
-            batch = val_items[start:start + probe_bs]
-            c_indices, c_emb_masks = wrapper._get_conditioning(batch, t5_cache=None)
-            B = len(batch)
-            qzshape = [B, wrapper.codebook_embed_dim, wrapper.latent_size, wrapper.latent_size]
-            idx = generate(
-                wrapper.gpt, c_indices, wrapper.latent_size ** 2, c_emb_masks,
+            batch    = val_items[start:start + probe_bs]
+            c_idx, c_msk = wrapper._get_conditioning(batch, t5_cache=None)
+            B        = len(batch)
+            qzshape  = [B, wrapper.codebook_embed_dim, wrapper.latent_size, wrapper.latent_size]
+            tokens   = generate(
+                wrapper.gpt, c_idx, wrapper.latent_size ** 2, c_msk,
                 cfg_scale=wrapper.cfg_scale,
                 temperature=wrapper.temperature,
                 top_k=wrapper.top_k, top_p=wrapper.top_p,
                 sample_logits=True,
             )
             wrapper._disable_kv_cache()
-            decoded = wrapper.vq_model.decode_code(idx, qzshape)
+            decoded  = wrapper.vq_model.decode_code(tokens, qzshape)
+
             for i, item in enumerate(batch):
-                img_t = (decoded[i].float().clamp(-1, 1) + 1) / 2
-                pil = TF.to_pil_image(img_t.cpu())
+                img_t  = (decoded[i].float().clamp(-1, 1) + 1) / 2
+                pil    = TF.to_pil_image(img_t.cpu())
+
+                # save image with prompt embedded in filename
+                if saved < n_save:
+                    safe_prompt = item.text[:60].replace(" ", "_").replace("/", "-")
+                    fname = f"{item.id}__{safe_prompt}.png"
+                    pil.save(img_dir / fname)
+                    saved += 1
+
                 result = reward_model.score_pil(pil, item)
                 all_rewards.append(result["reward"])
-                all_relations.append(result.get("components", {}).get("relation", 0.0))
+                for k, v in result.get("components", {}).items():
+                    all_comp.setdefault(k, []).append(v)
 
     mean_r   = float(np.mean(all_rewards))
-    mean_rel = float(np.mean(all_relations))
+    comp_means = {k: float(np.mean(v)) for k, v in all_comp.items()}
 
-    print(f"  [probe step={step}] mean_reward={mean_r:.4f}  mean_relation={mean_rel:.4f}  n={len(all_rewards)}")
+    # ── print table ───────────────────────────────────────────────────────────
+    bar_width = 30
+    print(f"\n  ┌─ probe step={step}  n={len(all_rewards)} ──────────────────────")
+    print(f"  │  mean_reward : {mean_r:.4f}  {'█' * int(mean_r * bar_width)}")
+    for k, v in comp_means.items():
+        bar  = '█' * int(v * bar_width)
+        flag = " ◄◄" if k == "relation" else ""
+        print(f"  │  {k:<14}: {v:.4f}  {bar}{flag}")
+    print(f"  │  images saved → {img_dir}")
+    print(f"  └────────────────────────────────────────────────────\n")
 
     if wandb_run:
-        wandb_run.log({"probe/mean_reward": mean_r, "probe/mean_relation": mean_rel, "step": step})
+        wandb_run.log({
+            "probe/mean_reward": mean_r,
+            **{f"probe/{k}": v for k, v in comp_means.items()},
+            "step": step,
+        })
 
-    return mean_r, mean_rel
+    return mean_r, comp_means.get("relation", 0.0)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Main
+# Main — epoch-based loop
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main():
@@ -405,20 +420,19 @@ def main():
     parser.add_argument("--run-name", default=None)
     args = parser.parse_args()
 
-    cfg = OmegaConf.load(args.config)
+    cfg      = OmegaConf.load(args.config)
     run_name = args.run_name or cfg.get("run_name", Path(args.config).stem)
 
-    # ── seed ─────────────────────────────────────────────────────────────────
     seed = cfg.get("seed", 42)
     torch.manual_seed(seed)
     random.seed(seed)
     np.random.seed(seed)
 
-    # ── output dir ────────────────────────────────────────────────────────────
     out_dir = Path(cfg.paths.output_root) / run_name
     out_dir.mkdir(parents=True, exist_ok=True)
     OmegaConf.save(cfg, out_dir / "config.yaml")
-    print(f"[train] run_name={run_name}  out_dir={out_dir}")
+    print(f"[train] run_name={run_name}")
+    print(f"[train] out_dir ={out_dir}")
 
     # ── wandb ─────────────────────────────────────────────────────────────────
     wandb_run = None
@@ -435,7 +449,15 @@ def main():
     # ── data ──────────────────────────────────────────────────────────────────
     train_items = load_shape_dataset(cfg.data.train_jsonl)
     val_items   = load_shape_dataset(cfg.data.val_jsonl)
-    print(f"[train] {len(train_items)} train  {len(val_items)} val")
+    batch_size  = cfg.training.batch_size
+    num_epochs  = cfg.training.num_epochs
+    steps_per_epoch = math.ceil(len(train_items) / batch_size)
+    total_steps = num_epochs * steps_per_epoch
+
+    print(f"[train] {len(train_items)} train prompts  {len(val_items)} val prompts")
+    print(f"[train] batch_size={batch_size}  G={cfg.training.num_samples}  "
+          f"epochs={num_epochs}  steps/epoch={steps_per_epoch}  total_steps={total_steps}")
+    print(f"[train] objective={cfg.training.objective}")
 
     # ── model ─────────────────────────────────────────────────────────────────
     sys.path.insert(0, cfg.paths.repo_root)
@@ -461,92 +483,126 @@ def main():
         learning_rate=float(cfg.training.lr),
         max_grad_norm=float(cfg.training.get("max_grad_norm", 1.0)),
     )
-    # trigger lazy load
     _ = wrapper.gpt
     _ = wrapper.vq_model
 
     reward_model = ShapeVerifierRewardModel()
 
+    # ── probe settings ────────────────────────────────────────────────────────
+    probe_every_steps = cfg.training.get("probe_every_steps", 10)
+    early_stop_drop   = cfg.training.get("early_stop_relation_drop", 0.10)
+
+    # ── fixed mini-probe prompts (shown every step, cheap) ────────────────────
+    n_mini = cfg.training.get("mini_probe_n", 4)
+    mini_items = val_items[:n_mini]   # always the same prompts so you can compare
+
     # ── baseline probe ────────────────────────────────────────────────────────
-    probe_every = cfg.training.get("probe_every_steps", 2)
-    early_stop_rel = cfg.training.get("early_stop_relation_drop", 0.10)
+    baseline_r, baseline_rel = run_probe(wrapper, reward_model, val_items, cfg,
+                                         step=0, out_dir=out_dir, wandb_run=wandb_run)
+    best_rel     = baseline_rel
+    global_step  = 0
+    metrics_log  = []
 
-    baseline_r, baseline_rel = run_probe(wrapper, reward_model, val_items, cfg, step=0, out_dir=out_dir, wandb_run=wandb_run)
-    best_rel = baseline_rel
+    # ── epoch loop ────────────────────────────────────────────────────────────
+    for epoch in range(1, num_epochs + 1):
+        epoch_items = train_items.copy()
+        random.shuffle(epoch_items)
+        epoch_rewards = []
+        t_epoch = time.time()
 
-    # ── training loop ─────────────────────────────────────────────────────────
-    total_steps    = cfg.training.total_steps
-    batch_size     = cfg.training.batch_size
-    objective      = cfg.training.objective
+        print(f"\n{'─'*60}")
+        print(f"  Epoch {epoch}/{num_epochs}")
+        print(f"{'─'*60}")
 
-    print(f"[train] objective={objective}  total_steps={total_steps}  G={cfg.training.num_samples}  bs={batch_size}")
+        for step_in_epoch in range(steps_per_epoch):
+            global_step += 1
+            start_i = step_in_epoch * batch_size
+            batch   = epoch_items[start_i: start_i + batch_size]
+            if not batch:
+                continue
 
-    train_idx   = list(range(len(train_items)))
-    metrics_log = []
-    t0 = time.time()
+            t0      = time.time()
+            metrics, _ = grpo_step(wrapper, reward_model, batch, cfg, global_step)
+            elapsed = time.time() - t0
 
-    for step in range(1, total_steps + 1):
-        random.shuffle(train_idx)
-        batch = [train_items[i] for i in train_idx[:batch_size]]
+            epoch_rewards.append(metrics["mean_reward"])
+            metrics_log.append(metrics)
 
-        metrics, details = grpo_step(wrapper, reward_model, batch, cfg, global_step=step, wandb_run=wandb_run)
-
-        elapsed = time.time() - t0
-        print(f"  step={step}/{total_steps}  "
-              f"loss={metrics['total_loss']:.4f}  "
-              f"pg={metrics['pg_loss']:.4f}  "
-              f"mean_r={metrics['mean_reward']:.4f}  "
-              f"grad_norm={metrics['grad_norm']:.3f}  "
-              f"t={elapsed:.0f}s")
-
-        metrics_log.append(metrics)
-        if wandb_run:
-            wandb_run.log({f"train/{k}": v for k, v in metrics.items()})
-
-        # append reward details
-        with open(out_dir / "reward_details.jsonl", "a", encoding="utf-8") as f:
-            for d in details:
-                f.write(json.dumps(d) + "\n")
-
-        # probe + early stopping
-        if step % probe_every == 0:
-            probe_r, probe_rel = run_probe(
-                wrapper, reward_model, val_items, cfg, step=step, out_dir=out_dir, wandb_run=wandb_run
+            # compact per-step line
+            comp_str = "  ".join(
+                f"{k.split('/')[1]}={v:.2f}"
+                for k, v in metrics.items()
+                if k.startswith("comp/")
             )
-            if probe_rel > best_rel:
-                best_rel = probe_rel
-                ckpt_path = out_dir / "best_checkpoint.pt"
-                torch.save(wrapper.gpt.state_dict(), ckpt_path)
-                print(f"    [ckpt] best relation={best_rel:.4f} → {ckpt_path}")
+            print(f"  ep{epoch} step{step_in_epoch+1:3d}/{steps_per_epoch}  "
+                  f"[global {global_step:4d}]  "
+                  f"pg={metrics['pg_loss']:+.4f}  "
+                  f"mean_r={metrics['mean_reward']:.4f}  "
+                  f"max_r={metrics['max_reward']:.4f}  "
+                  f"winners={metrics['n_winners']}/{len(batch)}  "
+                  f"gnorm={metrics['grad_norm']:.3f}  "
+                  f"({elapsed:.1f}s)")
+            if comp_str:
+                print(f"         components: {comp_str}")
 
-            # early stopping: if relation drops significantly below baseline
-            if probe_rel < baseline_rel - early_stop_rel:
-                print(f"  [early stop] relation {probe_rel:.4f} dropped > {early_stop_rel} below baseline {baseline_rel:.4f}")
-                break
+            if wandb_run:
+                wandb_run.log({f"train/{k}": v for k, v in metrics.items()})
 
-    # ── final checkpoint ──────────────────────────────────────────────────────
+            # mini-probe every step on 4 fixed val prompts (save images, cheap)
+            run_mini_probe(wrapper, reward_model, mini_items, global_step, out_dir)
+
+            # full val probe every probe_every_steps
+            if global_step % probe_every_steps == 0:
+                run_probe(wrapper, reward_model, val_items, cfg,
+                          step=global_step, out_dir=out_dir, wandb_run=wandb_run)
+
+        epoch_mean = float(np.mean(epoch_rewards)) if epoch_rewards else 0.0
+        print(f"\n  ── Epoch {epoch} summary: mean_reward={epoch_mean:.4f}  "
+              f"time={time.time()-t_epoch:.0f}s")
+
+        # probe at end of epoch always
+        probe_r, probe_rel = run_probe(
+            wrapper, reward_model, val_items, cfg,
+            step=global_step, out_dir=out_dir, wandb_run=wandb_run,
+        )
+        if probe_rel > best_rel:
+            best_rel  = probe_rel
+            ckpt_path = out_dir / "best_checkpoint.pt"
+            torch.save(wrapper.gpt.state_dict(), ckpt_path)
+            print(f"  [ckpt] best relation={best_rel:.4f} → {ckpt_path}")
+
+        if probe_rel < baseline_rel - early_stop_drop:
+            print(f"  [early stop] relation {probe_rel:.4f} dropped >"
+                  f" {early_stop_drop} below baseline {baseline_rel:.4f}")
+            break
+
+    # ── final save ────────────────────────────────────────────────────────────
     torch.save(wrapper.gpt.state_dict(), out_dir / "final_checkpoint.pt")
 
-    # ── save metrics ──────────────────────────────────────────────────────────
     with open(out_dir / "train_metrics.jsonl", "w", encoding="utf-8") as f:
         for m in metrics_log:
             f.write(json.dumps(m) + "\n")
 
     summary = {
-        "run_name":       run_name,
-        "objective":      objective,
-        "total_steps":    step,
-        "baseline_reward": baseline_r,
-        "baseline_relation": baseline_rel,
-        "best_relation":  best_rel,
-        "final_mean_reward": metrics_log[-1]["mean_reward"] if metrics_log else 0.0,
+        "run_name":           run_name,
+        "objective":          cfg.training.objective,
+        "epochs_run":         epoch,
+        "total_steps":        global_step,
+        "baseline_reward":    baseline_r,
+        "baseline_relation":  baseline_rel,
+        "best_relation":      best_rel,
+        "delta_relation":     best_rel - baseline_rel,
+        "final_mean_reward":  metrics_log[-1]["mean_reward"] if metrics_log else 0.0,
     }
     with open(out_dir / "summary.json", "w") as f:
         json.dump(summary, f, indent=2)
-    print(f"\n[train] done.  summary → {out_dir / 'summary.json'}")
+
+    print(f"\n[train] done.  Δrelation={best_rel - baseline_rel:+.4f}")
+    print(f"[train] summary → {out_dir / 'summary.json'}")
 
     if wandb_run:
-        wandb_run.log({"final/best_relation": best_rel})
+        wandb_run.log({"final/best_relation": best_rel,
+                       "final/delta_relation": best_rel - baseline_rel})
         wandb_run.finish()
 
 

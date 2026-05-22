@@ -36,18 +36,19 @@ lora:
 
 training:
   objective: winner_only_gcpo_lite
-  total_steps: 30
-  batch_size: 2
+  num_epochs: 5
+  batch_size: 8
   num_samples: 6
-  grad_accum_steps: 4
   lr: 1.0e-5
   beta: 0.01
   max_grad_norm: 1.0
   advantage_eps: 1.0e-8
   margin_threshold: 0.05
-  gcpo_alpha: 2.0          # boundary-upweight strength; 1 + alpha * norm_grad_entropy
-  probe_every_steps: 5
-  probe_batch_size: 4
+  gcpo_alpha: 2.0
+  mini_probe_n: 4
+  probe_every_steps: 10
+  probe_batch_size: 8
+  probe_save_images: 20
   early_stop_relation_drop: 0.10
 
 wandb:
