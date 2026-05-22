@@ -74,14 +74,13 @@ def main():
             found = 0
             for item in all_items:
                 tok_path = tokens_dir / f"{item.id}_seed{seed}.pt"
-                img_path = seed_img_dir / f"{item.id}.png"
+                img_path = seed_img_dir / f"{args.bucket}_{item.id}_sample0.png"
 
                 if not tok_path.exists():
                     print(f"  [warn] missing token: {tok_path}")
                     continue
                 if not img_path.exists():
-                    # try png with prompt-id as filename variants
-                    candidates = list(seed_img_dir.glob(f"{item.id}*.png"))
+                    candidates = list(seed_img_dir.glob(f"*{item.id}*.png"))
                     if not candidates:
                         print(f"  [warn] missing image: {img_path}")
                         continue
