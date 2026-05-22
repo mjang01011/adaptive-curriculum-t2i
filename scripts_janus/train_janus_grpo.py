@@ -110,7 +110,7 @@ def main():
 
     sys.path.insert(0, str(Path(__file__).parents[1]))
     from adaptive_curriculum.data.schemas import BucketItem
-    from adaptive_curriculum.reward.vlm_reward import VLMRewardModel
+    from adaptive_curriculum.reward.vlm_reward import Qwen3VLRewardModel as VLMRewardModel
     from scripts_janus.janus_wrapper import JanusProWrapper
 
     experiment  = os.environ.get("EXPERIMENT", cfg.experiment_name)

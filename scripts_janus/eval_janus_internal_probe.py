@@ -59,8 +59,8 @@ def main():
     print(f"[probe] Loaded {len(items)} items from {val_file}")
 
     # ── load reward model ──────────────────────────────────────────────
-    from adaptive_curriculum.reward.vlm_reward import VLMRewardModel
-    reward_model = VLMRewardModel(model_path=args.reward_model_path)
+    from adaptive_curriculum.reward.vlm_reward import Qwen3VLRewardModel
+    reward_model = Qwen3VLRewardModel(model_path=args.reward_model_path)
     print("[probe] Reward model loaded.")
 
     # ── load Janus ─────────────────────────────────────────────────────
