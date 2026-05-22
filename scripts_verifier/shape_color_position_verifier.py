@@ -260,6 +260,59 @@ def _resolve_shape(obj):
 
 # ── public API ────────────────────────────────────────────────────────────────
 
+def verify_image_bgr(img_bgr, metadata):
+    """Same as verify_image but accepts a pre-loaded BGR numpy array (avoids disk I/O)."""
+    if img_bgr is None:
+        return {"reward": 0.0, "components": {}, "detections": [], "error": "cannot_read"}
+    h, w = img_bgr.shape[:2]
+    image_area = h * w
+    img_hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    objects  = metadata.get("objects", [])
+    relation = metadata.get("relation", None)
+    dets = []
+    for obj in objects:
+        shape = _resolve_shape(obj)
+        d = _detect(img_hsv, obj["color"], shape, image_area)
+        dets.append(d)
+    quality   = _quality_score(dets, image_area)
+    if len(dets) == 2 and relation:
+        rel_score = _relation_score(dets[0], dets[1], relation, w, h)
+        sep_score = _separation_score(dets[0], dets[1])
+        ar_score  = _area_ratio_score(dets[0], dets[1])
+        components = {
+            "obj1_color": dets[0]["color_score"], "obj2_color": dets[1]["color_score"],
+            "obj1_shape": dets[0]["shape_score"],  "obj2_shape": dets[1]["shape_score"],
+            "relation": rel_score, "separation": sep_score,
+            "area_ratio": ar_score, "quality": quality,
+        }
+        reward = (0.20*components["obj1_color"] + 0.20*components["obj2_color"]
+                  + 0.05*components["obj1_shape"] + 0.05*components["obj2_shape"]
+                  + 0.25*components["relation"]   + 0.20*components["separation"]
+                  + 0.10*components["area_ratio"] + 0.05*components["quality"])
+    elif len(dets) == 2:
+        sep_score = _separation_score(dets[0], dets[1])
+        ar_score  = _area_ratio_score(dets[0], dets[1])
+        components = {
+            "obj1_color": dets[0]["color_score"], "obj2_color": dets[1]["color_score"],
+            "obj1_shape": dets[0]["shape_score"],  "obj2_shape": dets[1]["shape_score"],
+            "separation": sep_score, "area_ratio": ar_score, "quality": quality,
+        }
+        reward = (0.25*components["obj1_color"] + 0.25*components["obj2_color"]
+                  + 0.10*components["obj1_shape"] + 0.10*components["obj2_shape"]
+                  + 0.15*components["separation"] + 0.10*components["area_ratio"]
+                  + 0.05*components["quality"])
+    else:
+        components = {"quality": quality}
+        reward = quality * 0.1
+    clean_dets = [{k: v for k, v in d.items() if k != "contour"} for d in dets]
+    return {
+        "reward":     round(float(reward), 4),
+        "components": {k: round(float(v), 4) for k, v in components.items()},
+        "detections": clean_dets,
+        "_dets_with_contour": dets,
+    }
+
+
 def verify_image(image_path, metadata):
     """
     Args:

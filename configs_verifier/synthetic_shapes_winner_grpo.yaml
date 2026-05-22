@@ -1,0 +1,54 @@
+seed: 42
+run_name: synthetic_shapes_winner_grpo
+
+paths:
+  repo_root: /viscam/u/jj277/adaptive-curriculum-t2i/LlamaGen
+  output_root: /viscam/u/jj277/adaptive-curriculum-t2i/outputs_verifier/grpo_runs
+
+data:
+  train_jsonl: /viscam/u/jj277/adaptive-curriculum-t2i/data_synthetic_shapes/train.jsonl
+  val_jsonl:   /viscam/u/jj277/adaptive-curriculum-t2i/data_synthetic_shapes/val.jsonl
+
+model:
+  image_size: 256
+  gpt_model: GPT-XL
+  vq_ckpt:  /viscam/u/jj277/adaptive-curriculum-t2i/pretrained_models/vq_ds16_t2i.pt
+  gpt_ckpt: /viscam/u/jj277/adaptive-curriculum-t2i/pretrained_models/t2i_XL_stage1_256.pt
+  t5_path:  /viscam/u/jj277/adaptive-curriculum-t2i/pretrained_models/t5-ckpt
+  t5_model_type: flan-t5-xl
+  t5_feature_max_len: 120
+  cfg_scale: 2.0
+  cfg_scale_train: 2.0
+  temperature: 1.0
+  top_k: 1000
+  top_p: 1.0
+  mixed_precision: bf16
+  use_lora: true
+
+lora:
+  rank: 8
+  alpha: 16
+  dropout: 0.0
+  start_layer: 0
+  target_modules:
+    - wqkv
+    - wo
+
+training:
+  objective: winner_only
+  total_steps: 30
+  batch_size: 2
+  num_samples: 6
+  grad_accum_steps: 4
+  lr: 1.0e-5
+  beta: 0.01
+  max_grad_norm: 1.0
+  advantage_eps: 1.0e-8
+  margin_threshold: 0.05   # skip group if max_r - mean_r < this
+  probe_every_steps: 5
+  probe_batch_size: 4
+  early_stop_relation_drop: 0.10
+
+wandb:
+  enabled: true
+  project: llamagen-verifier-grpo
