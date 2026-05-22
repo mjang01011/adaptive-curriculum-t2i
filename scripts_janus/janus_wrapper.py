@@ -141,23 +141,14 @@ class JanusProWrapper:
         """
         Returns (tokens, attn_mask, uncond_tokens, uncond_mask) for CFG batch.
         All tensors: (B, max_len), left-padded.
-        Unconditional prompt uses empty string, matching official Janus-Pro repo.
+        Unconditional: keep first and last token, pad interior — matches official Janus-Pro.
         """
         pad_id = self.processor.pad_id
         all_ids = [
             self.processor.tokenizer.encode(_build_prompt_str(self.processor, p))
             for p in prompts
         ]
-        # unconditional: empty prompt string
-        uncond_ids_single = self.processor.tokenizer.encode(
-            _build_prompt_str(self.processor, "")
-        )
-
-        all_uncond_ids = [uncond_ids_single for _ in prompts]
-        max_len = max(
-            max(len(ids) for ids in all_ids),
-            len(uncond_ids_single),
-        )
+        max_len = max(len(ids) for ids in all_ids)
         B = len(prompts)
 
         tokens = torch.full((B, max_len), pad_id, dtype=torch.int).cuda()
@@ -165,15 +156,17 @@ class JanusProWrapper:
         uncond_tokens = torch.full((B, max_len), pad_id, dtype=torch.int).cuda()
         uncond_mask = torch.zeros(B, max_len, dtype=torch.long).cuda()
 
-        for b, (ids, u_ids) in enumerate(zip(all_ids, all_uncond_ids)):
-            # conditional — right-align
-            offset = max_len - len(ids)
+        for b, ids in enumerate(all_ids):
+            seq_len = len(ids)
+            offset = max_len - seq_len
             tokens[b, offset:] = torch.tensor(ids, dtype=torch.int)
             attn_mask[b, offset:] = 1
-            # unconditional — right-align
-            u_offset = max_len - len(u_ids)
-            uncond_tokens[b, u_offset:] = torch.tensor(u_ids, dtype=torch.int)
-            uncond_mask[b, u_offset:] = 1
+            # unconditional: keep first and last real token, pad interior
+            uncond_tokens[b, offset] = ids[0]
+            if seq_len > 2:
+                uncond_tokens[b, offset + 1: offset + seq_len - 1] = pad_id
+            uncond_tokens[b, offset + seq_len - 1] = ids[-1]
+            uncond_mask[b, offset:] = 1
 
         return tokens, attn_mask, uncond_tokens, uncond_mask, max_len, all_ids
 
