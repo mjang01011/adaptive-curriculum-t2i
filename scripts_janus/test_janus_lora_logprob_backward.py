@@ -37,13 +37,13 @@ print("=== A. Loading model ===")
 processor = VLChatProcessor.from_pretrained(MODEL_PATH)
 from transformers import AutoConfig
 _config = AutoConfig.from_pretrained(MODEL_PATH, trust_remote_code=True)
-_config.language_config._attn_implementation = 'eager'
+_language_config = _config.language_config
+_language_config._attn_implementation = 'eager'
 model: MultiModalityCausalLM = AutoModelForCausalLM.from_pretrained(
     MODEL_PATH,
-    config=_config,
+    language_config=_language_config,
     trust_remote_code=True,
-    torch_dtype=torch.bfloat16,
-).cuda()
+).to(torch.bfloat16).cuda()
 print("Model loaded.")
 
 
