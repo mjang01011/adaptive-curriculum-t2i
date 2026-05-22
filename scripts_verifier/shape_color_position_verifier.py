@@ -225,15 +225,15 @@ def _quality_score(detections, image_area):
 # ── object → shape family ─────────────────────────────────────────────────────
 
 OBJECT_FAMILY = {
+    # round
     "ball":  "circle",
     "coin":  "circle",
     "plate": "circle",
+    # rectangular
     "book":  "rect",
     "box":   "rect",
-    "window": "rect",
-    "kite":  "triangle",
-    "cone":  "triangle",
-    "tent":  "triangle",
+    "card":  "rect",
+    "block": "rect",
 }
 
 # map family names to what _shape_score expects

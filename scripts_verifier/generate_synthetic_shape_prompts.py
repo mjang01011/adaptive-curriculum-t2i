@@ -35,7 +35,7 @@ SHAPE_TEMPLATES = {
 OBJECT_FAMILY = {
     "ball":  "circle",
     "book":  "rect",
-    "kite":  "triangle",
+    "box":   "rect",
 }
 OBJECTS  = list(OBJECT_FAMILY.keys())
 OBJECT_RELATIONS = ["left_of", "right_of"]
