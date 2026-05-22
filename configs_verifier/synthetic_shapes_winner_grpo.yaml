@@ -12,9 +12,9 @@ data:
 model:
   image_size: 256
   gpt_model: GPT-XL
-  vq_ckpt:  /viscam/u/jj277/adaptive-curriculum-t2i/pretrained_models/vq_ds16_t2i.pt
-  gpt_ckpt: /viscam/u/jj277/adaptive-curriculum-t2i/pretrained_models/t2i_XL_stage1_256.pt
-  t5_path:  /viscam/u/jj277/adaptive-curriculum-t2i/pretrained_models/t5-ckpt
+  vq_ckpt:  /viscam/u/jj277/svl/B3S/baselines/LlamaGen/pretrained_models/vq_ds16_t2i.pt
+  gpt_ckpt: /viscam/u/jj277/svl/B3S/baselines/LlamaGen/pretrained_models/t2i_XL_stage1_256.pt
+  t5_path:  /viscam/u/jj277/svl/B3S/baselines/LlamaGen/pretrained_models/t5-ckpt
   t5_model_type: flan-t5-xl
   t5_feature_max_len: 120
   cfg_scale: 2.0
