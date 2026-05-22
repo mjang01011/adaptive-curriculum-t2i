@@ -129,7 +129,9 @@ def main():
     parser.add_argument("--reward-mode",  default="pseudo_soft_grpo_target_heavy")
     parser.add_argument("--qwen-model",   default="Qwen/Qwen3-VL-4B-Instruct")
     # output
-    parser.add_argument("--save-tokens",  action="store_true")
+    parser.add_argument("--save-tokens",     action="store_true")
+    parser.add_argument("--init-checkpoint", default=None,
+                        help="Path to best_checkpoint.pt from previous DPO round.")
     args = parser.parse_args()
 
     assert len(args.seeds) == 2, "G=2 requires exactly 2 seeds"
@@ -156,10 +158,14 @@ def main():
         gpt_ckpt=args.gpt_ckpt,
         t5_path=args.t5_path,
         cfg_scale=args.cfg_scale,
-        use_lora=False,
+        use_lora=bool(args.init_checkpoint),
     )
     _ = wrapper.gpt
     _ = wrapper.vq_model
+    if args.init_checkpoint:
+        ckpt = torch.load(args.init_checkpoint, map_location="cuda")
+        wrapper.gpt.load_state_dict(ckpt)
+        print(f"[gen] loaded init checkpoint: {args.init_checkpoint}")
     print("[gen] LlamaGen loaded.")
 
     # ── load Qwen ─────────────────────────────────────────────────────────────

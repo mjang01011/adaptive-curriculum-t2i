@@ -97,6 +97,11 @@ def dpo_loss_no_ref(chosen_lp, rejected_lp, pair_weights, beta):
     return (pair_weights * raw).mean()
 
 
+def sft_loss_fn(chosen_lp, pair_weights):
+    """NLL on chosen tokens weighted by pair confidence."""
+    return -(pair_weights * chosen_lp).mean()
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Val eval — generate + score + save grid HTML
 # ══════════════════════════════════════════════════════════════════════════════
@@ -303,6 +308,10 @@ def main():
     parser.add_argument("--batch-size",        type=int,   default=2)
     parser.add_argument("--use-reference",     action="store_true",
                         help="Use LoRA-zeroed reference model in DPO loss (slower but more principled)")
+    parser.add_argument("--sft-lambda",        type=float, default=0.0,
+                        help="Weight for SFT (NLL on chosen) added to DPO loss. 0=DPO-only.")
+    parser.add_argument("--init-checkpoint",   default=None,
+                        help="Path to best_checkpoint.pt from a previous round to init from.")
     parser.add_argument("--max-grad-norm",     type=float, default=1.0)
     parser.add_argument("--seed",              type=int,   default=42)
     # eval
@@ -383,6 +392,11 @@ def main():
     _ = wrapper.vq_model
     print("[dpo] LlamaGen + LoRA loaded.")
 
+    if args.init_checkpoint:
+        ckpt = torch.load(args.init_checkpoint, map_location="cuda")
+        wrapper.gpt.load_state_dict(ckpt)
+        print(f"[dpo] loaded init checkpoint: {args.init_checkpoint}")
+
     # ── load Qwen ─────────────────────────────────────────────────────────────
     from adaptive_curriculum.reward.vlm_reward import Qwen3VLRewardModel
     reward_model = Qwen3VLRewardModel(model_id=args.qwen_model)
@@ -397,6 +411,8 @@ def main():
     best_val_r  = base_r
     global_step = 0
     metrics_log = []
+    # Always write best_checkpoint.pt so next round has a valid file to load.
+    torch.save(wrapper.gpt.state_dict(), out_dir / "best_checkpoint.pt")
 
     # ── training loop ─────────────────────────────────────────────────────────
     for epoch in range(1, args.epochs + 1):
@@ -454,11 +470,18 @@ def main():
                 with torch.no_grad():
                     ref_chosen_lp   = wrapper._compute_log_probs_ref(chosen_tokens,   c_indices, c_emb_masks)
                     ref_rejected_lp = wrapper._compute_log_probs_ref(rejected_tokens, c_indices, c_emb_masks)
-                loss = dpo_loss_with_ref(chosen_lp, rejected_lp,
-                                         ref_chosen_lp, ref_rejected_lp,
-                                         pair_weights, beta=args.beta)
+                dpo_l = dpo_loss_with_ref(chosen_lp, rejected_lp,
+                                          ref_chosen_lp, ref_rejected_lp,
+                                          pair_weights, beta=args.beta)
             else:
-                loss = dpo_loss_no_ref(chosen_lp, rejected_lp, pair_weights, beta=args.beta)
+                dpo_l = dpo_loss_no_ref(chosen_lp, rejected_lp, pair_weights, beta=args.beta)
+
+            if args.sft_lambda > 0:
+                sft_l = sft_loss_fn(chosen_lp, pair_weights)
+                loss  = dpo_l + args.sft_lambda * sft_l
+            else:
+                sft_l = torch.tensor(0.0)
+                loss  = dpo_l
 
             wrapper._optimizer.zero_grad()
             loss.backward()
@@ -476,14 +499,18 @@ def main():
             mean_margin = float(np.mean([p["margin"] for p in batch]))
             epoch_losses.append(loss_val)
 
+            dpo_val = dpo_l.item()
+            sft_val = sft_l.item() if args.sft_lambda > 0 else 0.0
+            sft_str = f"  sft={sft_val:.4f}" if args.sft_lambda > 0 else ""
             print(f"  ep{epoch} [{global_step:4d}]  "
-                  f"loss={loss_val:.4f}  "
+                  f"loss={loss_val:.4f}  dpo={dpo_val:.4f}{sft_str}  "
                   f"chosen_lp={chosen_lp.mean().item():.3f}  "
                   f"rej_lp={rejected_lp.mean().item():.3f}  "
                   f"margin={mean_margin:.3f}  "
                   f"gnorm={grad_norm:.3f}  ({elapsed:.1f}s)")
 
             m = {"step": global_step, "epoch": epoch, "loss": loss_val,
+                 "dpo_loss": dpo_val, "sft_loss": sft_val,
                  "chosen_lp": chosen_lp.mean().item(),
                  "rejected_lp": rejected_lp.mean().item(),
                  "mean_margin": mean_margin, "grad_norm": grad_norm}
@@ -507,16 +534,17 @@ def main():
 
         print(f"\n  ── Epoch {epoch} done  mean_loss={np.mean(epoch_losses):.4f}")
 
-        # end-of-epoch eval
-        val_r, _, _ = run_val_eval(
-            wrapper, reward_model, val_items_by_bucket, args.val_seeds,
-            step=global_step, out_dir=out_dir, base_images=base_images,
-            reward_mode=args.reward_mode, wandb_run=wandb_run,
-        )
-        if val_r > best_val_r:
-            best_val_r = val_r
-            torch.save(wrapper.gpt.state_dict(), out_dir / "best_checkpoint.pt")
-            print(f"  [ckpt] best val_r={best_val_r:.4f}")
+        # end-of-epoch eval — skip if periodic eval already ran at this exact step
+        if global_step % args.eval_every_steps != 0:
+            val_r, _, _ = run_val_eval(
+                wrapper, reward_model, val_items_by_bucket, args.val_seeds,
+                step=global_step, out_dir=out_dir, base_images=base_images,
+                reward_mode=args.reward_mode, wandb_run=wandb_run,
+            )
+            if val_r > best_val_r:
+                best_val_r = val_r
+                torch.save(wrapper.gpt.state_dict(), out_dir / "best_checkpoint.pt")
+                print(f"  [ckpt] best val_r={best_val_r:.4f}")
 
     # ── final save ────────────────────────────────────────────────────────────
     torch.save(wrapper.gpt.state_dict(), out_dir / "final_checkpoint.pt")
