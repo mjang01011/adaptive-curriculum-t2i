@@ -264,9 +264,15 @@ class Qwen3VLRewardModel(RewardModel):
     def _load(self):
         if self._model is not None:
             return
+        import os
         import torch
         from transformers import AutoProcessor, AutoModelForImageTextToText
-        self._processor = AutoProcessor.from_pretrained(self.model_id)
+        # Newer huggingface_hub validates repo_id format before checking if the
+        # string is a local path, so absolute paths fail the namespace/repo check.
+        # Passing local_files_only=True skips the hub lookup entirely.
+        _local = os.path.isdir(self.model_id)
+        _from_pretrained_kwargs = {"local_files_only": True} if _local else {}
+        self._processor = AutoProcessor.from_pretrained(self.model_id, **_from_pretrained_kwargs)
         self._processor.tokenizer.padding_side = "left"
         try:
             import flash_attn  # noqa: F401
@@ -278,6 +284,7 @@ class Qwen3VLRewardModel(RewardModel):
             dtype=torch.bfloat16,
             device_map=self.device,
             attn_implementation=attn_impl,
+            **_from_pretrained_kwargs,
         )
         self._model.eval()
 
