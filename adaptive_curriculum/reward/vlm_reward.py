@@ -178,9 +178,9 @@ class Qwen3VLRewardModel(RewardModel):
         self._processor = AutoProcessor.from_pretrained(self.model_id)
         self._model = AutoModelForImageTextToText.from_pretrained(
             self.model_id,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             device_map=self.device,
-            attn_implementation="flash_attention_2",
+            attn_implementation="sdpa",
         )
         self._model.eval()
 
