@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from adaptive_curriculum.reward.reward_schema import RewardModel
+from adaptive_curriculum.reward.grpo_rewards import GATED_V2_MODES, apply_gated_v2
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +321,8 @@ class Qwen3VLRewardModel(RewardModel):
 
     def score_image(self, image, item, mode: str = "hard_target") -> dict:
         # Select question set based on mode
-        if mode in ("pseudo_soft_grpo", "pseudo_soft_grpo_target_heavy", "qwen_logit_grpo_target_heavy"):
+        if mode in ("pseudo_soft_grpo", "pseudo_soft_grpo_target_heavy",
+                    "qwen_logit_grpo_target_heavy") or mode in GATED_V2_MODES:
             questions = getattr(item, "grpo_reward_questions", []) or []
             if not questions:
                 questions = item.target_questions
@@ -399,6 +401,54 @@ class Qwen3VLRewardModel(RewardModel):
             qt: v["score_sum"] / v["weight_sum"] if v["weight_sum"] > 0 else 0.0
             for qt, v in components.items()
         }
+
+        # ── Gated-v2 compositional reward ────────────────────────────────
+        # For these modes: build a flat comp dict (one float per q_type, using
+        # pseudo-soft scores), add uncertain_frac, then apply the formula.
+        if mode in GATED_V2_MODES:
+            # Per-question pseudo-soft scores (ignoring weights — formula handles weighting)
+            type_scores: dict = {}
+            type_counts: dict = {}
+            n_uncertain = 0
+            for pred, q in zip(answers, questions):
+                expected = q.answer.lower()
+                q_type = getattr(q, "q_type", "unknown")
+                q_score = _pseudo_soft_score(pred, expected)
+                type_scores[q_type] = type_scores.get(q_type, 0.0) + q_score
+                type_counts[q_type] = type_counts.get(q_type, 0) + 1
+                if pred == "uncertain":
+                    n_uncertain += 1
+
+            comp = {qt: type_scores[qt] / type_counts[qt] for qt in type_scores}
+            comp["uncertain_frac"] = n_uncertain / max(n, 1)
+
+            bucket = getattr(item, "bucket", "")
+            reward, debug = apply_gated_v2(mode, comp, bucket=bucket)
+
+            # Re-build question_scores with pseudo-soft scoring for logging consistency
+            question_scores_v2 = []
+            for pred, q in zip(answers, questions):
+                expected = q.answer.lower()
+                q_score = _pseudo_soft_score(pred, expected)
+                question_scores_v2.append({
+                    "question":  q.question,
+                    "expected":  expected,
+                    "predicted": pred,
+                    "correct":   pred == expected,
+                    "score":     q_score,
+                    "weight":    1.0,
+                    "q_type":    getattr(q, "q_type", "unknown"),
+                })
+
+            return {
+                "score":           float(reward),
+                "question_scores": question_scores_v2,
+                "component_scores": comp,
+                "mode":            mode,
+                "vlm_seconds":     vlm_seconds,
+                "num_questions":   n,
+                "reward_debug":    {**debug, "reward_mode": mode},
+            }
 
         return {
             "score": float(score),
