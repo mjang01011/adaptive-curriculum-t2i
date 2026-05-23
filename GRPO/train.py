@@ -345,7 +345,7 @@ def main():
         wrapper.load_checkpoint(args.init_checkpoint)
 
     # ── Build GRPOTrainer ─────────────────────────────────────────────────────
-    from GRPO.trainer import GRPOTrainer
+    from trainer import GRPOTrainer
     trainer = GRPOTrainer(
         wrapper=wrapper,
         num_generations=args.num_generations,
