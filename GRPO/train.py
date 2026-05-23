@@ -279,7 +279,7 @@ def run_val(
             log_dict[f"val/comp/{k}"] = sum(vs) / len(vs)
         wandb.log(log_dict, step=step)
 
-    return mean_hard, results
+    return mean_hard, mean_smooth, results
 
 
 # ---------------------------------------------------------------------------
@@ -409,19 +409,21 @@ def main():
     # ── Step-0 val (untrained baseline) ──────────────────────────────────────
     if panel_items:
         print(f"[step 0] running baseline val eval ({len(panel_items)} panel items) ...")
-        val_reward, val_results = run_val(
+        val_reward, val_smooth, val_results = run_val(
             wrapper, reward_model, panel_items,
             reward_mode=args.reward_mode,
             output_dir=str(out_dir),
             step=0,
             use_wandb=use_wandb,
         )
-        print(f"[step 0] val_hard_reward={val_reward:.4f}")
-        best_val_reward = val_reward
+        print(f"[step 0] val_hard_reward={val_reward:.4f}  val_smooth_reward={val_smooth:.4f}")
+        _use_smooth_for_best = "contrastive" in args.reward_mode
+        best_val_reward = val_smooth if _use_smooth_for_best else val_reward
         with open(train_log_path, "a") as f:
             f.write(json.dumps({
                 "step": 0,
                 "val_reward": val_reward,
+                "val_smooth_reward": val_smooth,
                 "val_results": [{k: v for k, v in r.items() if k != "comp_scores"}
                                 for r in val_results],
             }) + "\n")
@@ -494,45 +496,49 @@ def main():
         # ── val eval + W&B image panel ────────────────────────────────────────
         if panel_items and step % args.val_every == 0:
             print(f"[step {step}] running val eval ({len(panel_items)} panel items) ...")
-            val_reward, val_results = run_val(
+            val_reward, val_smooth, val_results = run_val(
                 wrapper, reward_model, panel_items,
                 reward_mode=args.reward_mode,
                 output_dir=str(out_dir),
                 step=step,
                 use_wandb=use_wandb,
             )
-            print(f"[step {step}] val_hard_reward={val_reward:.4f}")
+            print(f"[step {step}] val_hard_reward={val_reward:.4f}  val_smooth_reward={val_smooth:.4f}")
 
             with open(train_log_path, "a") as f:
                 f.write(json.dumps({
                     "step": step,
                     "val_reward": val_reward,
+                    "val_smooth_reward": val_smooth,
                     "val_results": [{k: v for k, v in r.items() if k != "comp_scores"}
                                     for r in val_results],
                 }) + "\n")
 
-            if val_reward > best_val_reward:
-                best_val_reward = val_reward
+            _tracked = val_smooth if _use_smooth_for_best else val_reward
+            if _tracked > best_val_reward:
+                best_val_reward = _tracked
                 trainer.save_checkpoint(best_ckpt_path)
-                print(f"[step {step}] NEW BEST val_reward={val_reward:.4f} → {best_ckpt_path}")
+                print(f"[step {step}] NEW BEST {'smooth' if _use_smooth_for_best else 'hard'}="
+                      f"{_tracked:.4f} → {best_ckpt_path}")
 
     # ── Final save + val ──────────────────────────────────────────────────────
     trainer.save_checkpoint(latest_ckpt_path)
 
     if panel_items and step % args.val_every != 0:
         print(f"[step {step}] running final val eval ...")
-        val_reward, val_results = run_val(
+        val_reward, val_smooth, val_results = run_val(
             wrapper, reward_model, panel_items,
             reward_mode=args.reward_mode,
             output_dir=str(out_dir),
             step=step,
             use_wandb=use_wandb,
         )
-        print(f"[step {step}] final val_hard_reward={val_reward:.4f}")
+        print(f"[step {step}] final val_hard_reward={val_reward:.4f}  val_smooth_reward={val_smooth:.4f}")
         with open(train_log_path, "a") as f:
             f.write(json.dumps({
                 "step": step,
                 "val_reward": val_reward,
+                "val_smooth_reward": val_smooth,
                 "val_results": [{k: v for k, v in r.items() if k != "comp_scores"}
                                 for r in val_results],
             }) + "\n")
