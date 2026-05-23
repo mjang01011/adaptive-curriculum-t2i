@@ -161,76 +161,98 @@ def run_val(
     use_wandb=False,
 ):
     """
-    Generate one image per panel item, score with both hard_target and reward_mode.
-    Saves images to disk. Logs annotated images + component score scalars to W&B.
-    Returns (mean_hard_reward, per_item_results).
+    Generate one image per panel item (batched), score with both hard_target and
+    reward_mode (batched). Saves images to disk. Logs annotated images + component
+    score scalars to W&B. Returns (mean_hard_reward, per_item_results).
     """
+    import contextlib
     from autoregressive.models.generate import generate
     from torchvision.utils import save_image
 
     out_dir = Path(output_dir) / "val_images" / f"step_{step:06d}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    N = len(panel_items)
     wrapper.gpt.eval()
-    results = []
-    wandb_images = {}         # key -> wandb.Image  (one per panel slot)
-    comp_accum = {}           # q_type -> list of scores
+
+    try:
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+        _sdpa_ctx = lambda: sdpa_kernel([SDPBackend.FLASH_ATTENTION,
+                                         SDPBackend.EFFICIENT_ATTENTION,
+                                         SDPBackend.MATH])
+    except Exception:
+        _sdpa_ctx = contextlib.nullcontext
+
+    # ── batched generation (all N panel items in one forward pass) ────────
+    with torch.no_grad():
+        c_indices, c_emb_masks = wrapper._get_conditioning(panel_items)
+
+    qzshape = [N, wrapper.codebook_embed_dim, wrapper.latent_size, wrapper.latent_size]
+    with torch.no_grad(), _sdpa_ctx():
+        tokens = generate(
+            wrapper.gpt, c_indices, wrapper.latent_size ** 2,
+            c_emb_masks,
+            cfg_scale=wrapper.cfg_scale,
+            temperature=wrapper.temperature,
+            top_k=wrapper.top_k,
+            top_p=wrapper.top_p,
+            sample_logits=True,
+        )
+    wrapper._disable_kv_cache()
 
     with torch.no_grad():
-        for idx, item in enumerate(panel_items):
-            c_indices, c_emb_masks = wrapper._get_conditioning([item])
-            qzshape = [1, wrapper.codebook_embed_dim, wrapper.latent_size, wrapper.latent_size]
-            tokens = generate(
-                wrapper.gpt, c_indices, wrapper.latent_size ** 2,
-                c_emb_masks,
-                cfg_scale=wrapper.cfg_scale,
-                temperature=wrapper.temperature,
-                top_k=wrapper.top_k,
-                top_p=wrapper.top_p,
-                sample_logits=True,
+        decoded = wrapper.vq_model.decode_code(tokens, qzshape)
+
+    # ── decode to PIL + save (order matches panel_items exactly) ─────────
+    pil_imgs = []
+    for idx, item in enumerate(panel_items):
+        pil_img = _decode_to_pil(decoded[idx])
+        pil_imgs.append(pil_img)
+        save_image(decoded[idx:idx + 1], str(out_dir / f"{item.id}.png"),
+                   normalize=True, value_range=(-1, 1))
+
+    # ── batched scoring (two passes: hard_target + reward_mode) ──────────
+    pairs = list(zip(pil_imgs, panel_items))
+    hard_results = reward_model.score_images_batch(pairs, mode="hard_target")
+    grpo_results = reward_model.score_images_batch(pairs, mode=reward_mode)
+
+    # ── assemble results (indices guaranteed to align with panel_items) ───
+    results = []
+    wandb_images = {}
+    comp_accum = {}
+
+    for idx, (item, pil_img, hard_result, grpo_result) in enumerate(
+        zip(panel_items, pil_imgs, hard_results, grpo_results)
+    ):
+        hard_score  = hard_result["score"]
+        grpo_score  = grpo_result["score"]
+        comp_scores = grpo_result.get("component_scores", {})
+
+        results.append({
+            "item_id":     item.id,
+            "prompt":      item.text,
+            "hard_score":  hard_score,
+            "grpo_score":  grpo_score,
+            "comp_scores": comp_scores,
+        })
+
+        for k, v in comp_scores.items():
+            comp_accum.setdefault(k, []).append(v)
+
+        if use_wandb:
+            import wandb
+            prompt_short = item.text[:55] + ("..." if len(item.text) > 55 else "")
+            comp_str = "  ".join(f"{k}={v:.2f}" for k, v in sorted(comp_scores.items()))
+            caption_lines = [
+                f"[step {step}] {prompt_short}",
+                f"hard={hard_score:.2f}  grpo={grpo_score:.2f}",
+                comp_str[:72] if comp_str else "",
+            ]
+            annotated = _annotate_image(pil_img, [l for l in caption_lines if l])
+            wandb_images[f"val/panel_{idx:02d}"] = wandb.Image(
+                annotated,
+                caption=f"step={step}  hard={hard_score:.2f}  {prompt_short}",
             )
-            wrapper._disable_kv_cache()
-            decoded = wrapper.vq_model.decode_code(tokens, qzshape)
-
-            # Save PNG
-            img_path = str(out_dir / f"{item.id}.png")
-            save_image(decoded, img_path, normalize=True, value_range=(-1, 1))
-
-            # Score
-            pil_img = _decode_to_pil(decoded[0])
-            hard_result  = reward_model.score_image(pil_img, item, mode="hard_target")
-            grpo_result  = reward_model.score_image(pil_img, item, mode=reward_mode)
-            hard_score   = hard_result["score"]
-            grpo_score   = grpo_result["score"]
-            comp_scores  = grpo_result.get("component_scores", {})
-
-            results.append({
-                "item_id":     item.id,
-                "prompt":      item.text,
-                "hard_score":  hard_score,
-                "grpo_score":  grpo_score,
-                "comp_scores": comp_scores,
-            })
-
-            # Accumulate component scores
-            for k, v in comp_scores.items():
-                comp_accum.setdefault(k, []).append(v)
-
-            # Build annotated W&B image
-            if use_wandb:
-                import wandb
-                prompt_short = item.text[:55] + ("..." if len(item.text) > 55 else "")
-                comp_str = "  ".join(f"{k}={v:.2f}" for k, v in sorted(comp_scores.items()))
-                caption_lines = [
-                    f"[step {step}] {prompt_short}",
-                    f"hard={hard_score:.2f}  grpo={grpo_score:.2f}",
-                    comp_str[:72] if comp_str else "",
-                ]
-                annotated = _annotate_image(pil_img, [l for l in caption_lines if l])
-                wandb_images[f"val/panel_{idx:02d}"] = wandb.Image(
-                    annotated,
-                    caption=f"step={step}  hard={hard_score:.2f}  {prompt_short}",
-                )
 
     hard_scores = [r["hard_score"] for r in results]
     mean_hard   = sum(hard_scores) / max(len(hard_scores), 1)
@@ -238,7 +260,6 @@ def run_val(
     if use_wandb:
         import wandb
         log_dict = {**wandb_images, "val/mean_hard_reward": mean_hard}
-        # Per-component mean scalars
         for k, vs in comp_accum.items():
             log_dict[f"val/comp/{k}"] = sum(vs) / len(vs)
         wandb.log(log_dict, step=step)
