@@ -96,7 +96,7 @@ def parse_vlm_json_answers(response_text: str, n_questions: int) -> Optional[Lis
             except (json.JSONDecodeError, ValueError):
                 pass
 
-    if data is None:
+    if data is None or not isinstance(data, dict):
         return None
 
     answers_raw = data.get("answers", [])
@@ -224,7 +224,10 @@ class Qwen3VLRewardModel(RewardModel):
     def _generate_text(self, inputs, max_new_tokens: int) -> str:
         import torch
         with torch.inference_mode():
-            out_ids = self._model.generate(**inputs, max_new_tokens=max_new_tokens)
+            out_ids = self._model.generate(
+                **inputs, max_new_tokens=max_new_tokens,
+                do_sample=False,
+            )
         return self._processor.batch_decode(
             out_ids[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True
         )[0].strip()
@@ -261,7 +264,10 @@ class Qwen3VLRewardModel(RewardModel):
         import torch
         inputs = self._build_batch_inputs(images_and_prompts)
         with torch.inference_mode():
-            out_ids = self._model.generate(**inputs, max_new_tokens=max_new_tokens)
+            out_ids = self._model.generate(
+                **inputs, max_new_tokens=max_new_tokens,
+                do_sample=False,
+            )
         input_len = inputs["input_ids"].shape[1]
         return [t.strip() for t in self._processor.batch_decode(
             out_ids[:, input_len:], skip_special_tokens=True
@@ -274,6 +280,7 @@ class Qwen3VLRewardModel(RewardModel):
             out = self._model.generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
+                do_sample=False,
                 return_dict_in_generate=True,
                 output_scores=True,
             )
