@@ -274,6 +274,200 @@ class Qwen3VLRewardModel(RewardModel):
             out_ids[:, input_len:], skip_special_tokens=True
         )]
 
+    def _get_yesno_probs_batch(self, image_question_pairs: list, chunk_size: int = 32) -> list:
+        """
+        Batched forward pass: extract P(yes), P(no), P(uncertain) for each (image, question) pair.
+        No text generation — reads last-token logits only.
+        Returns list of {"yes": float, "no": float, "uncertain": float, "margin": float}.
+        Processes in chunks to manage GPU memory.
+        """
+        import torch
+        if not image_question_pairs:
+            return []
+        self._load()
+        tok = self._processor.tokenizer
+
+        def _first_token_ids(strings):
+            ids = set()
+            for s in strings:
+                encoded = tok.encode(s, add_special_tokens=False)
+                if encoded:
+                    ids.add(encoded[0])
+            return list(ids) or None
+
+        yes_ids = _first_token_ids(["yes", "Yes", "YES"])
+        no_ids  = _first_token_ids(["no",  "No",  "NO"])
+        unc_ids = _first_token_ids(["uncertain", "Uncertain", "UNCERTAIN",
+                                     "unsure", "Unsure"])
+
+        def _best_logit(logits_row, ids):
+            if not ids:
+                return -1e9
+            return max(logits_row[i].item() for i in ids)
+
+        all_results = []
+        for start in range(0, len(image_question_pairs), chunk_size):
+            chunk = image_question_pairs[start: start + chunk_size]
+            prompts = [
+                (img, f"{q}\nAnswer with only 'yes', 'no', or 'uncertain'.")
+                for img, q in chunk
+            ]
+            inputs = self._build_batch_inputs(prompts)
+            with torch.inference_mode():
+                outputs = self._model(**inputs)
+            last_logits = outputs.logits[:, -1, :]  # (chunk, vocab)
+
+            for logits_row in last_logits:
+                yes_l = _best_logit(logits_row, yes_ids)
+                no_l  = _best_logit(logits_row, no_ids)
+                unc_l = _best_logit(logits_row, unc_ids)
+                max_l = max(yes_l, no_l, unc_l)
+                e_yes = math.exp(yes_l - max_l)
+                e_no  = math.exp(no_l  - max_l)
+                e_unc = math.exp(unc_l - max_l)
+                total = e_yes + e_no + e_unc
+                p_yes = e_yes / total
+                p_no  = e_no  / total
+                p_unc = e_unc / total
+                top2 = sorted([p_yes, p_no, p_unc], reverse=True)
+                all_results.append({
+                    "yes": p_yes, "no": p_no, "uncertain": p_unc,
+                    "margin": top2[0] - top2[1],
+                })
+        return all_results
+
+    def _score_logit_gated_v2(self, image, item, questions: list, mode: str) -> dict:
+        """Single-image logit scoring for gated_v2 modes. Called by score_image()."""
+        n = len(questions)
+        if n == 0:
+            return {"score": 0.0, "question_scores": [], "component_scores": {},
+                    "mode": mode, "vlm_seconds": 0.0, "num_questions": 0,
+                    "reward_debug": {"reward_mode": mode}}
+        t0 = time.time()
+        probs_list = self._get_yesno_probs_batch(
+            [(image, q.question) for q in questions]
+        )
+        vlm_seconds = time.time() - t0
+
+        type_scores: dict = {}
+        type_counts: dict = {}
+        total_p_unc = 0.0
+        question_scores = []
+        for probs, q in zip(probs_list, questions):
+            expected = q.answer.lower()
+            q_type = getattr(q, "q_type", "unknown")
+            q_score = (probs["yes"] + 0.5 * probs["uncertain"]) if expected == "yes" \
+                      else (probs["no"] + 0.5 * probs["uncertain"])
+            type_scores[q_type] = type_scores.get(q_type, 0.0) + q_score
+            type_counts[q_type] = type_counts.get(q_type, 0) + 1
+            total_p_unc += probs["uncertain"]
+            predicted = max(["yes", "no", "uncertain"], key=lambda k: probs[k])
+            question_scores.append({
+                "question":    q.question,
+                "expected":    expected,
+                "predicted":   predicted,
+                "correct":     predicted == expected,
+                "score":       q_score,
+                "weight":      1.0,
+                "q_type":      q_type,
+                "p_yes":       probs["yes"],
+                "p_no":        probs["no"],
+                "p_uncertain": probs["uncertain"],
+                "margin":      probs["margin"],
+            })
+
+        comp = {qt: type_scores[qt] / type_counts[qt] for qt in type_scores}
+        comp["uncertain_frac"] = total_p_unc / max(n, 1)
+        bucket = getattr(item, "bucket", "")
+        reward, debug = apply_gated_v2(mode, comp, bucket=bucket)
+
+        self._total_vlm_calls += len(questions)
+        self._total_questions_answered += n
+        self._total_vlm_seconds += vlm_seconds
+        return {
+            "score":            float(reward),
+            "question_scores":  question_scores,
+            "component_scores": comp,
+            "mode":             mode,
+            "vlm_seconds":      vlm_seconds,
+            "num_questions":    n,
+            "reward_debug":     {**debug, "reward_mode": mode},
+        }
+
+    def _score_images_batch_logit_gated_v2(self, images_and_items: list, mode: str) -> list:
+        """Batched logit scoring for gated_v2 modes. Called by score_images_batch()."""
+        def _get_questions(item):
+            qs = getattr(item, "grpo_reward_questions", []) or []
+            return qs if qs else item.target_questions
+
+        questions_list = [_get_questions(item) for _, item in images_and_items]
+
+        # Flatten all (image, question) pairs with back-pointers
+        flat_pairs: list = []
+        flat_meta: list = []
+        for i, ((img, _), qs) in enumerate(zip(images_and_items, questions_list)):
+            for j, q in enumerate(qs):
+                flat_pairs.append((img, q.question))
+                flat_meta.append((i, j))
+
+        t0 = time.time()
+        flat_probs = self._get_yesno_probs_batch(flat_pairs)
+        vlm_seconds = time.time() - t0
+        per_img_s = vlm_seconds / max(len(images_and_items), 1)
+
+        # Reassemble per-item probability lists
+        item_probs: list = [[] for _ in images_and_items]
+        for (i, _j), probs in zip(flat_meta, flat_probs):
+            item_probs[i].append(probs)
+
+        self._total_vlm_calls += len(flat_pairs)
+        self._total_questions_answered += len(flat_pairs)
+        self._total_vlm_seconds += vlm_seconds
+
+        results = []
+        for (_, item), qs, probs_list in zip(images_and_items, questions_list, item_probs):
+            n = len(qs)
+            type_scores: dict = {}
+            type_counts: dict = {}
+            total_p_unc = 0.0
+            question_scores = []
+            for probs, q in zip(probs_list, qs):
+                expected = q.answer.lower()
+                q_type = getattr(q, "q_type", "unknown")
+                q_score = (probs["yes"] + 0.5 * probs["uncertain"]) if expected == "yes" \
+                          else (probs["no"] + 0.5 * probs["uncertain"])
+                type_scores[q_type] = type_scores.get(q_type, 0.0) + q_score
+                type_counts[q_type] = type_counts.get(q_type, 0) + 1
+                total_p_unc += probs["uncertain"]
+                predicted = max(["yes", "no", "uncertain"], key=lambda k: probs[k])
+                question_scores.append({
+                    "question":    q.question,
+                    "expected":    expected,
+                    "predicted":   predicted,
+                    "correct":     predicted == expected,
+                    "score":       q_score,
+                    "weight":      1.0,
+                    "q_type":      q_type,
+                    "p_yes":       probs["yes"],
+                    "p_no":        probs["no"],
+                    "p_uncertain": probs["uncertain"],
+                    "margin":      probs["margin"],
+                })
+            comp = {qt: type_scores[qt] / type_counts[qt] for qt in type_scores}
+            comp["uncertain_frac"] = total_p_unc / max(n, 1)
+            bucket = getattr(item, "bucket", "")
+            reward, debug = apply_gated_v2(mode, comp, bucket=bucket)
+            results.append({
+                "score":            float(reward),
+                "question_scores":  question_scores,
+                "component_scores": comp,
+                "mode":             mode,
+                "vlm_seconds":      per_img_s,
+                "num_questions":    n,
+                "reward_debug":     {**debug, "reward_mode": mode},
+            })
+        return results
+
     def _generate_with_scores(self, inputs, max_new_tokens: int):
         """Generate and return (text, scores) for first-token probability extraction."""
         import torch
@@ -417,6 +611,10 @@ class Qwen3VLRewardModel(RewardModel):
             return [self.score_image(img, item, mode=mode)
                     for img, item in images_and_items]
 
+        # Gated-v2: batched logit scoring (numerically stable, no JSON generation)
+        if mode in GATED_V2_MODES:
+            return self._score_images_batch_logit_gated_v2(images_and_items, mode)
+
         # Select question set per item
         def _get_questions(item):
             if mode in ("pseudo_soft_grpo", "pseudo_soft_grpo_target_heavy") \
@@ -482,46 +680,14 @@ class Qwen3VLRewardModel(RewardModel):
                 for qt, v in comps.items()
             }
 
-            # Gated-v2 modes: override scalar with formula
-            if mode in GATED_V2_MODES:
-                type_scores: dict = {}
-                type_counts: dict = {}
-                n_uncertain = 0
-                for pred, q in zip(answers, questions):
-                    qt = getattr(q, "q_type", "unknown")
-                    s = _pseudo_soft_score(pred, q.answer.lower())
-                    type_scores[qt] = type_scores.get(qt, 0.0) + s
-                    type_counts[qt] = type_counts.get(qt, 0) + 1
-                    if pred == "uncertain":
-                        n_uncertain += 1
-                comp = {qt: type_scores[qt] / type_counts[qt] for qt in type_scores}
-                comp["uncertain_frac"] = n_uncertain / max(n, 1)
-                bucket = getattr(item, "bucket", "")
-                reward, debug = apply_gated_v2(mode, comp, bucket=bucket)
-                qs_v2 = [{
-                    "question": q.question, "expected": q.answer.lower(),
-                    "predicted": pred, "correct": pred == q.answer.lower(),
-                    "score": _pseudo_soft_score(pred, q.answer.lower()),
-                    "weight": 1.0, "q_type": getattr(q, "q_type", "unknown"),
-                } for pred, q in zip(answers, questions)]
-                results.append({
-                    "score": float(reward),
-                    "question_scores": qs_v2,
-                    "component_scores": comp,
-                    "mode": mode,
-                    "vlm_seconds": per_img_s,
-                    "num_questions": n,
-                    "reward_debug": {**debug, "reward_mode": mode},
-                })
-            else:
-                results.append({
-                    "score": float(scalar),
-                    "question_scores": question_scores,
-                    "component_scores": component_scores,
-                    "mode": mode,
-                    "vlm_seconds": per_img_s,
-                    "num_questions": n,
-                })
+            results.append({
+                "score": float(scalar),
+                "question_scores": question_scores,
+                "component_scores": component_scores,
+                "mode": mode,
+                "vlm_seconds": per_img_s,
+                "num_questions": n,
+            })
 
         return results
 
@@ -534,6 +700,9 @@ class Qwen3VLRewardModel(RewardModel):
                 questions = item.target_questions
         else:
             questions = item.target_questions
+
+        if mode in GATED_V2_MODES:
+            return self._score_logit_gated_v2(image, item, questions, mode)
 
         n = len(questions)
         t0 = time.time()
@@ -607,54 +776,6 @@ class Qwen3VLRewardModel(RewardModel):
             qt: v["score_sum"] / v["weight_sum"] if v["weight_sum"] > 0 else 0.0
             for qt, v in components.items()
         }
-
-        # ── Gated-v2 compositional reward ────────────────────────────────
-        # For these modes: build a flat comp dict (one float per q_type, using
-        # pseudo-soft scores), add uncertain_frac, then apply the formula.
-        if mode in GATED_V2_MODES:
-            # Per-question pseudo-soft scores (ignoring weights — formula handles weighting)
-            type_scores: dict = {}
-            type_counts: dict = {}
-            n_uncertain = 0
-            for pred, q in zip(answers, questions):
-                expected = q.answer.lower()
-                q_type = getattr(q, "q_type", "unknown")
-                q_score = _pseudo_soft_score(pred, expected)
-                type_scores[q_type] = type_scores.get(q_type, 0.0) + q_score
-                type_counts[q_type] = type_counts.get(q_type, 0) + 1
-                if pred == "uncertain":
-                    n_uncertain += 1
-
-            comp = {qt: type_scores[qt] / type_counts[qt] for qt in type_scores}
-            comp["uncertain_frac"] = n_uncertain / max(n, 1)
-
-            bucket = getattr(item, "bucket", "")
-            reward, debug = apply_gated_v2(mode, comp, bucket=bucket)
-
-            # Re-build question_scores with pseudo-soft scoring for logging consistency
-            question_scores_v2 = []
-            for pred, q in zip(answers, questions):
-                expected = q.answer.lower()
-                q_score = _pseudo_soft_score(pred, expected)
-                question_scores_v2.append({
-                    "question":  q.question,
-                    "expected":  expected,
-                    "predicted": pred,
-                    "correct":   pred == expected,
-                    "score":     q_score,
-                    "weight":    1.0,
-                    "q_type":    getattr(q, "q_type", "unknown"),
-                })
-
-            return {
-                "score":           float(reward),
-                "question_scores": question_scores_v2,
-                "component_scores": comp,
-                "mode":            mode,
-                "vlm_seconds":     vlm_seconds,
-                "num_questions":   n,
-                "reward_debug":    {**debug, "reward_mode": mode},
-            }
 
         return {
             "score": float(score),

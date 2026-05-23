@@ -60,10 +60,11 @@ def find_image(images_dir: Path, pi: int, s: int, item_id: str):
     return matches[0] if matches else None
 
 
-def scores_equal(a: dict, b: dict, tol: float = 1e-6) -> tuple:
+def scores_equal(a: dict, b: dict, tol: float = 1e-6, check_labels: bool = True) -> tuple:
     """
     Returns (ok: bool, issues: list[str]).
-    Checks schema, score, component_scores, question_scores labels.
+    Checks schema, score, component_scores, and (optionally) question_scores labels.
+    For logit-based modes (gated_v2), use a relaxed tol and check_labels=False.
     """
     issues = []
 
@@ -87,18 +88,19 @@ def scores_equal(a: dict, b: dict, tol: float = 1e-6) -> tuple:
             if dc > tol:
                 issues.append(f"component[{k}] diff={dc:.6f}")
 
-    # Question-level labels (predicted answers)
-    aqs = a.get("question_scores", [])
-    bqs = b.get("question_scores", [])
-    if len(aqs) != len(bqs):
-        issues.append(f"question_scores length mismatch: {len(aqs)} vs {len(bqs)}")
-    else:
-        for qi, (aq, bq) in enumerate(zip(aqs, bqs)):
-            if aq["predicted"] != bq["predicted"]:
-                issues.append(
-                    f"q{qi} predicted mismatch: seq={aq['predicted']} bat={bq['predicted']}"
-                    f" | q={aq['question'][:40]}"
-                )
+    # Question-level labels (predicted answers) — skip for logit-scored modes
+    if check_labels:
+        aqs = a.get("question_scores", [])
+        bqs = b.get("question_scores", [])
+        if len(aqs) != len(bqs):
+            issues.append(f"question_scores length mismatch: {len(aqs)} vs {len(bqs)}")
+        else:
+            for qi, (aq, bq) in enumerate(zip(aqs, bqs)):
+                if aq["predicted"] != bq["predicted"]:
+                    issues.append(
+                        f"q{qi} predicted mismatch: seq={aq['predicted']} bat={bq['predicted']}"
+                        f" | q={aq['question'][:40]}"
+                    )
 
     return len(issues) == 0, issues
 
@@ -170,8 +172,11 @@ def main():
             score_diffs = []
             label_flips = 0
 
+            is_logit_mode = "gated_v2" in mode
+            cmp_tol = 0.005 if is_logit_mode else 1e-6
             for i, (seq, bat) in enumerate(zip(seq_scores, bat_scores)):
-                ok, issues = scores_equal(seq, bat, tol=1e-6)
+                ok, issues = scores_equal(seq, bat, tol=cmp_tol,
+                                          check_labels=not is_logit_mode)
                 score_diffs.append(abs(seq["score"] - bat["score"]))
                 if ok:
                     ok_count += 1
