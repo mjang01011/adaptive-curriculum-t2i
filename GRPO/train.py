@@ -57,8 +57,8 @@ def parse_args():
     p.add_argument("--t5-path",    required=True)
 
     # ── LoRA ────────────────────────────────────────────────────────────────
-    p.add_argument("--lora-r",              type=int,   default=24)
-    p.add_argument("--lora-alpha",          type=int,   default=48)
+    p.add_argument("--lora-r",              type=int,   default=16)
+    p.add_argument("--lora-alpha",          type=int,   default=32)
     p.add_argument("--lora-dropout",        type=float, default=0.0)
     p.add_argument("--lora-target-modules", nargs="+",  default=["wqkv", "wo", "w1", "w2", "w3"])
     p.add_argument("--lora-start-layer",    type=int,   default=0)
