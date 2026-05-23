@@ -127,12 +127,16 @@ def main():
     import time
     import torchvision.transforms.functional as TF
 
-    group_rewards   = []   # (N, G) — target reward mode
-    group_hard      = []   # (N, G) — hard_target
-    group_comp      = []   # (N, G, dict) — component scores
+    N = len(sampled)
+    G = args.num_samples
+
+    # (N, G) reward accumulators
+    group_rewards = [[None] * G for _ in range(N)]
+    group_hard    = [[None] * G for _ in range(N)]
+    group_comp    = [[{}]   * G for _ in range(N)]
 
     # timing accumulators
-    t_gen_all   = []   # per-image generation seconds
+    t_gen_all   = []   # per-batch generation seconds
     t_score_all = []   # per-image scoring seconds (both modes)
 
     wrapper.gpt.eval()
@@ -140,62 +144,71 @@ def main():
 
     t_total_start = time.perf_counter()
 
-    for pi, item in enumerate(sampled):
-        with torch.no_grad():
-            c_indices, c_emb_masks = wrapper._get_conditioning([item])
+    # Pre-compute conditioning for all N prompts at once
+    with torch.no_grad():
+        c_indices, c_emb_masks = wrapper._get_conditioning(sampled)
 
-        rewards_i = []
-        hard_i    = []
-        comp_i    = []
+    qzshape = [N, wrapper.codebook_embed_dim, wrapper.latent_size, wrapper.latent_size]
 
-        qzshape = [1, wrapper.codebook_embed_dim, wrapper.latent_size, wrapper.latent_size]
+    # Build SDPA context (enables FlashAttention / memory-efficient attention if available)
+    import contextlib
+    try:
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+        _sdpa_ctx = lambda: sdpa_kernel([SDPBackend.FLASH_ATTENTION,
+                                         SDPBackend.EFFICIENT_ATTENTION,
+                                         SDPBackend.MATH])
+    except Exception:
+        _sdpa_ctx = contextlib.nullcontext
 
-        for s in range(args.num_samples):
-            t_gen_start = time.perf_counter()
-            with torch.no_grad():
-                tokens = generate(
-                    wrapper.gpt, c_indices, wrapper.latent_size ** 2,
-                    c_emb_masks,
-                    cfg_scale=args.cfg_scale,
-                    temperature=args.temperature,
-                    top_k=args.top_k,
-                    top_p=args.top_p,
-                    sample_logits=True,
-                )
-                wrapper._disable_kv_cache()
-                decoded = wrapper.vq_model.decode_code(tokens, qzshape)
-            t_gen_all.append(time.perf_counter() - t_gen_start)
+    # Generate G samples for all N prompts in parallel (same pattern as trainer rollout)
+    for s in range(G):
+        t_gen_start = time.perf_counter()
+        with torch.no_grad(), _sdpa_ctx():
+            tokens = generate(
+                wrapper.gpt, c_indices, wrapper.latent_size ** 2,
+                c_emb_masks,
+                cfg_scale=args.cfg_scale,
+                temperature=args.temperature,
+                top_k=args.top_k,
+                top_p=args.top_p,
+                sample_logits=True,
+            )
+            wrapper._disable_kv_cache()
+            decoded = wrapper.vq_model.decode_code(tokens, qzshape)
+        t_gen_all.append(time.perf_counter() - t_gen_start)
 
-            img_t = (decoded[0].float().clamp(-1, 1) + 1) / 2
+        print(f"[probe] sample {s+1}/{G} generated ({t_gen_all[-1]:.1f}s for {N} images)  scoring...")
+
+        for pi, item in enumerate(sampled):
+            img_t = (decoded[pi].float().clamp(-1, 1) + 1) / 2
             pil_img = TF.to_pil_image(img_t.cpu())
 
-            # Save image
             img_path = out_dir / f"p{pi:03d}_s{s:02d}_{item.id}.png"
             pil_img.save(str(img_path))
 
-            # Score
             t_score_start = time.perf_counter()
             r = reward_model.score_image(pil_img, item, mode=args.reward_mode)
             h = reward_model.score_image(pil_img, item, mode="hard_target")
             t_score_all.append(time.perf_counter() - t_score_start)
 
-            rewards_i.append(r["score"])
-            hard_i.append(h["score"])
-            comp_i.append(r.get("component_scores", {}))
+            group_rewards[pi][s] = r["score"]
+            group_hard[pi][s]    = h["score"]
+            group_comp[pi][s]    = r.get("component_scores", {})
 
             details_rows.append({
                 "prompt_id": item.id,
-                "prompt": item.prompt,
-                "sample": s,
-                "reward": r["score"],
-                "hard": h["score"],
+                "prompt":    item.prompt,
+                "sample":    s,
+                "reward":    r["score"],
+                "hard":      h["score"],
                 "component_scores": r.get("component_scores", {}),
-                "reward_debug": r.get("reward_debug", {}),
+                "reward_debug":     r.get("reward_debug", {}),
             })
 
-        group_rewards.append(rewards_i)
-        group_hard.append(hard_i)
-        group_comp.append(comp_i)
+        import statistics as _s
+        mean_r = _s.mean(group_rewards[pi][s] for pi in range(N))
+        mean_st = _s.mean(t_score_all[-N:])
+        print(f"[probe] sample {s+1}/{G} scored  mean_reward={mean_r:.3f}  mean_score_t={mean_st:.1f}s/img")
 
     # ── Compute metrics ──────────────────────────────────────────────────────
     import statistics

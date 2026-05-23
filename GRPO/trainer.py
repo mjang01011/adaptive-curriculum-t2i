@@ -157,8 +157,17 @@ class GRPOTrainer:
         all_pil_imgs: list = []
         qzshape = [B, wrapper.codebook_embed_dim, wrapper.latent_size, wrapper.latent_size]
 
+        import contextlib
+        try:
+            from torch.nn.attention import sdpa_kernel, SDPBackend
+            _sdpa_ctx = lambda: sdpa_kernel([SDPBackend.FLASH_ATTENTION,
+                                             SDPBackend.EFFICIENT_ATTENTION,
+                                             SDPBackend.MATH])
+        except Exception:
+            _sdpa_ctx = contextlib.nullcontext
+
         t_gen_start = time.perf_counter()
-        with torch.no_grad():
+        with torch.no_grad(), _sdpa_ctx():
             for s in range(G):
                 index_sample = generate(
                     wrapper.gpt, c_indices, wrapper.latent_size ** 2,
