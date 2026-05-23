@@ -41,6 +41,7 @@ class GRPOTrainer:
         epsilon: float = 0.2,
         scale_rewards: bool = True,
         max_grad_norm: float = 1.0,
+        logprob_mode: str = "cfg",
     ):
         self.wrapper = wrapper
         self.G = num_generations
@@ -49,6 +50,7 @@ class GRPOTrainer:
         self.epsilon = epsilon
         self.scale_rewards = scale_rewards
         self.max_grad_norm = max_grad_norm
+        self.logprob_mode = logprob_mode
         self._step = 0
 
     # ------------------------------------------------------------------
@@ -63,8 +65,12 @@ class GRPOTrainer:
     ) -> torch.Tensor:
         """
         Returns (B, seq_len) per-token log probs under current policy.
-        Dropout disabled; uncond_prob zeroed.
-        Caller must ensure gpt is in float32 before calling.
+
+        logprob_mode="cfg":   logits_cfg = logits_uncond + cfg_scale*(logits_cond - logits_uncond)
+                              Matches the CFG-guided generation distribution exactly.
+        logprob_mode="conditional": conditional-only forward (legacy, mismatched with CFG generation).
+
+        Dropout disabled; uncond_prob zeroed. Caller must ensure gpt is in float32.
         """
         gpt = self.wrapper.gpt
         gpt.train()
@@ -78,15 +84,39 @@ class GRPOTrainer:
             tokens_long = image_tokens.long()
             c_cast = c_indices.float()
 
-            logits, _ = gpt(
-                idx=tokens_long[:, :-1],
-                cond_idx=c_cast,
-                input_pos=None,
-                targets=None,
-                mask=None,
-                valid=None,
-            )
-            logits = logits.float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
+            if self.logprob_mode == "cfg":
+                cfg_scale = self.wrapper.cfg_scale_train
+                # Unconditional conditioning: matches generate() for t2i exactly —
+                # zeros_like(cond) + uncond_embedding broadcasts (B,120,2048).
+                c_uncond = (torch.zeros_like(c_cast)
+                            + gpt.cls_embedding.uncond_embedding)
+
+                # Double the batch [cond; uncond] — same pattern as generate().
+                tokens_2x = tokens_long.repeat(2, 1)
+                c_2x = torch.cat([c_cast, c_uncond], dim=0)
+
+                logits_2x, _ = gpt(
+                    idx=tokens_2x[:, :-1],
+                    cond_idx=c_2x,
+                    input_pos=None,
+                    targets=None,
+                    mask=None,
+                    valid=None,
+                )
+                logits_2x = logits_2x.float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
+                logits_cond, logits_uncond = logits_2x.chunk(2, dim=0)
+                logits = logits_uncond + cfg_scale * (logits_cond - logits_uncond)
+            else:
+                logits, _ = gpt(
+                    idx=tokens_long[:, :-1],
+                    cond_idx=c_cast,
+                    input_pos=None,
+                    targets=None,
+                    mask=None,
+                    valid=None,
+                )
+                logits = logits.float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
+
             log_p = F.log_softmax(logits, dim=-1)
             token_lp = log_p.gather(-1, tokens_long.unsqueeze(-1)).squeeze(-1)  # (B, seq_len)
             return token_lp.clamp(min=-20.0)

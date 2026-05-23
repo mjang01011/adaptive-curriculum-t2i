@@ -57,10 +57,10 @@ def parse_args():
     p.add_argument("--t5-path",    required=True)
 
     # ── LoRA ────────────────────────────────────────────────────────────────
-    p.add_argument("--lora-r",              type=int,   default=16)
-    p.add_argument("--lora-alpha",          type=int,   default=32)
+    p.add_argument("--lora-r",              type=int,   default=32)
+    p.add_argument("--lora-alpha",          type=int,   default=64)
     p.add_argument("--lora-dropout",        type=float, default=0.0)
-    p.add_argument("--lora-target-modules", nargs="+",  default=["wqkv", "wo"])
+    p.add_argument("--lora-target-modules", nargs="+",  default=["wqkv", "wo", "w1", "w2", "w3"])
     p.add_argument("--lora-start-layer",    type=int,   default=0)
 
     # ── GRPO hypers ──────────────────────────────────────────────────────────
@@ -84,10 +84,14 @@ def parse_args():
     p.add_argument("--reward-mode",     default="pseudo_soft_grpo_target_heavy")
     p.add_argument("--qwen-model",      default=None, help="HF model ID or local path for Qwen3-VL reward (default: Qwen/Qwen3-VL-4B-Instruct)")
 
+    # ── logprob mode ─────────────────────────────────────────────────────────
+    p.add_argument("--logprob-mode",    default="cfg", choices=["conditional", "cfg"],
+                   help="cfg: logprobs match CFG generation (recommended); conditional: cond-only (legacy)")
+
     # ── output / logging ─────────────────────────────────────────────────────
     p.add_argument("--output-dir",      required=True)
     p.add_argument("--save-every",      type=int, default=50)
-    p.add_argument("--val-every",        type=int, default=50)
+    p.add_argument("--val-every",        type=int, default=30)
     p.add_argument("--log-every",        type=int, default=10)
     p.add_argument("--num-panel-items",  type=int, default=8,
                    help="Fixed val items logged as W&B image panel every val step")
@@ -354,6 +358,7 @@ def main():
         epsilon=args.epsilon,
         scale_rewards=not args.no_scale_rewards,
         max_grad_norm=args.max_grad_norm,
+        logprob_mode=args.logprob_mode,
     )
 
     # ── Build reward model ────────────────────────────────────────────────────
@@ -384,6 +389,26 @@ def main():
     print(f"[train] Starting GRPO training: {args.num_steps} steps, "
           f"B={args.batch_size}, G={args.num_generations}, "
           f"beta={args.beta}, epsilon={args.epsilon}, lr={args.lr}")
+
+    # ── Step-0 val (untrained baseline) ──────────────────────────────────────
+    if panel_items:
+        print(f"[step 0] running baseline val eval ({len(panel_items)} panel items) ...")
+        val_reward, val_results = run_val(
+            wrapper, reward_model, panel_items,
+            reward_mode=args.reward_mode,
+            output_dir=str(out_dir),
+            step=0,
+            use_wandb=use_wandb,
+        )
+        print(f"[step 0] val_hard_reward={val_reward:.4f}")
+        best_val_reward = val_reward
+        with open(train_log_path, "a") as f:
+            f.write(json.dumps({
+                "step": 0,
+                "val_reward": val_reward,
+                "val_results": [{k: v for k, v in r.items() if k != "comp_scores"}
+                                for r in val_results],
+            }) + "\n")
 
     while step < args.num_steps:
         # ── sample batch ──────────────────────────────────────────────────────
@@ -431,7 +456,7 @@ def main():
             print(f"[step {step}] saved latest checkpoint → {latest_ckpt_path}")
 
         # ── val eval + W&B image panel ────────────────────────────────────────
-        if panel_items and (step % args.val_every == 0 or step == args.num_steps):
+        if panel_items and step % args.val_every == 0:
             print(f"[step {step}] running val eval ({len(panel_items)} panel items) ...")
             val_reward, val_results = run_val(
                 wrapper, reward_model, panel_items,
@@ -455,8 +480,26 @@ def main():
                 trainer.save_checkpoint(best_ckpt_path)
                 print(f"[step {step}] NEW BEST val_reward={val_reward:.4f} → {best_ckpt_path}")
 
-    # ── Final save ────────────────────────────────────────────────────────────
+    # ── Final save + val ──────────────────────────────────────────────────────
     trainer.save_checkpoint(latest_ckpt_path)
+
+    if panel_items and step % args.val_every != 0:
+        print(f"[step {step}] running final val eval ...")
+        val_reward, val_results = run_val(
+            wrapper, reward_model, panel_items,
+            reward_mode=args.reward_mode,
+            output_dir=str(out_dir),
+            step=step,
+            use_wandb=use_wandb,
+        )
+        print(f"[step {step}] final val_hard_reward={val_reward:.4f}")
+        with open(train_log_path, "a") as f:
+            f.write(json.dumps({
+                "step": step,
+                "val_reward": val_reward,
+                "val_results": [{k: v for k, v in r.items() if k != "comp_scores"}
+                                for r in val_results],
+            }) + "\n")
     elapsed_total = time.time() - t0_total
 
     summary = {
