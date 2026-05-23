@@ -176,11 +176,16 @@ class Qwen3VLRewardModel(RewardModel):
         import torch
         from transformers import AutoProcessor, AutoModelForImageTextToText
         self._processor = AutoProcessor.from_pretrained(self.model_id)
+        try:
+            import flash_attn  # noqa: F401
+            attn_impl = "flash_attention_2"
+        except ImportError:
+            attn_impl = "sdpa"
         self._model = AutoModelForImageTextToText.from_pretrained(
             self.model_id,
             dtype=torch.bfloat16,
             device_map=self.device,
-            attn_implementation="sdpa",
+            attn_implementation=attn_impl,
         )
         self._model.eval()
 
