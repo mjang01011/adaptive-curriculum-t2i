@@ -91,20 +91,30 @@ class GRPOTrainer:
                 c_uncond = (torch.zeros_like(c_cast)
                             + gpt.cls_embedding.uncond_embedding)
 
-                # Double the batch [cond; uncond] — same pattern as generate().
-                tokens_2x = tokens_long.repeat(2, 1)
-                c_2x = torch.cat([c_cast, c_uncond], dim=0)
-
-                logits_2x, _ = gpt(
-                    idx=tokens_2x[:, :-1],
-                    cond_idx=c_2x,
+                # Conditional branch — full gradient graph.
+                logits_cond, _ = gpt(
+                    idx=tokens_long[:, :-1],
+                    cond_idx=c_cast,
                     input_pos=None,
                     targets=None,
                     mask=None,
                     valid=None,
                 )
-                logits_2x = logits_2x.float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
-                logits_cond, logits_uncond = logits_2x.chunk(2, dim=0)
+                logits_cond = logits_cond.float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
+
+                # Unconditional branch — no gradient needed; detaching halves backward
+                # activation memory. Gradient flows through cond branch only (×cfg_scale).
+                with torch.no_grad():
+                    logits_uncond, _ = gpt(
+                        idx=tokens_long[:, :-1],
+                        cond_idx=c_uncond,
+                        input_pos=None,
+                        targets=None,
+                        mask=None,
+                        valid=None,
+                    )
+                    logits_uncond = logits_uncond.float().nan_to_num(nan=0.0, posinf=100.0, neginf=-100.0)
+
                 logits = logits_uncond + cfg_scale * (logits_cond - logits_uncond)
             else:
                 logits, _ = gpt(
