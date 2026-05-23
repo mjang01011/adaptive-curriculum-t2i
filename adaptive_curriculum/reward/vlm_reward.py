@@ -176,6 +176,7 @@ class Qwen3VLRewardModel(RewardModel):
         import torch
         from transformers import AutoProcessor, AutoModelForImageTextToText
         self._processor = AutoProcessor.from_pretrained(self.model_id)
+        self._processor.tokenizer.padding_side = "left"
         try:
             import flash_attn  # noqa: F401
             attn_impl = "flash_attention_2"
