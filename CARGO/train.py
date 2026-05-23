@@ -66,7 +66,7 @@ def parse_args():
     # ── GRPO / CARGO hypers ───────────────────────────────────────────────────
     p.add_argument("--num-generations", type=int,   default=8,   help="G: samples per prompt")
     p.add_argument("--num-iterations",  type=int,   default=1,   help="PPO update iterations (CARGO default=1)")
-    p.add_argument("--beta",            type=float, default=1.0, help="Reverse-KL penalty coefficient")
+    p.add_argument("--beta",            type=float, default=0.2, help="Reverse-KL penalty coefficient")
     p.add_argument("--epsilon",         type=float, default=0.2, help="PPO clip ratio")
     p.add_argument("--no-scale-rewards", action="store_true",    help="Subtract mean only, don't divide by std")
     p.add_argument("--batch-size",      type=int,   default=2,   help="Prompts per CARGO step (default 2 for GPU fit)")
