@@ -1,10 +1,13 @@
 """
 CARGO mask utilities: Component-Aware Reward-Grounded token importance maps.
 
-compute_cargo_mask()    — winner-aligned importance, 16×16 spatial smoothing, soft floor
-make_random_mask()      — random baseline (same floor/scale)
-make_early_token_mask() — early-token sharpening baseline
-overlay_mask_on_image() — heatmap blend for visual diagnostics
+compute_cargo_mask()            — winner-aligned importance, 16×16 smoothing, soft floor
+compute_cargo_mask_with_stats() — same + returns raw I and diagnostic stats dict
+make_diversity_mask()           — pure token diversity (no reward weighting) baseline
+make_random_mask()              — random baseline (same floor/scale)
+make_early_token_mask()         — early-token sharpening baseline
+overlay_mask_on_image()         — heatmap blend with optional stats annotation
+make_raw_heatmap()              — colormap-only image (no image overlay)
 """
 import math
 
@@ -70,9 +73,106 @@ def compute_cargo_mask(
     return mask_floor + (1.0 - mask_floor) * I_norm
 
 
+def compute_cargo_mask_with_stats(
+    tokens_b:    torch.Tensor,
+    R_c_b:       torch.Tensor,
+    latent_size: int   = 16,
+    mask_floor:  float = 0.30,
+) -> tuple:
+    """
+    Same as compute_cargo_mask but also returns (raw_I, stats_dict).
+
+    raw_I    : (seq_len,) float32 — importance before smoothing/normalization/floor.
+               All-zero if fallback triggered (reward tie or G=1).
+    stats    : dict with min, max, mean, std, entropy of the FINAL mask,
+               plus reward_spread and n_valid_losers.
+    """
+    G, seq_len = tokens_b.shape
+    device = tokens_b.device
+
+    winner_idx    = int(R_c_b.argmax().item())
+    winner_tokens = tokens_b[winner_idx]
+
+    I = torch.zeros(seq_len, device=device, dtype=torch.float32)
+    n_valid = 0
+    for g in range(G):
+        if g == winner_idx:
+            continue
+        margin = max(float(R_c_b[winner_idx].item()) - float(R_c_b[g].item()), 0.0)
+        if margin < 1e-6:
+            continue
+        I += (winner_tokens != tokens_b[g]).float() * margin
+        n_valid += 1
+
+    raw_I = I.clone()
+    if n_valid > 0:
+        I = I / n_valid
+
+    I_2d     = I.reshape(1, 1, latent_size, latent_size)
+    I_smooth = F.avg_pool2d(I_2d, kernel_size=3, stride=1, padding=1).reshape(seq_len)
+
+    I_min, I_max = I_smooth.min(), I_smooth.max()
+    if (I_max - I_min).item() > 1e-6:
+        I_norm = (I_smooth - I_min) / (I_max - I_min)
+    else:
+        I_norm = torch.full_like(I_smooth, 0.5)
+
+    mask = mask_floor + (1.0 - mask_floor) * I_norm
+
+    # entropy of mask treated as a distribution (higher = more uniform)
+    p = mask / mask.sum().clamp(min=1e-9)
+    entropy = float(-( p * (p + 1e-12).log() ).sum().item())
+    max_entropy = float(math.log(seq_len))
+
+    reward_spread = float(R_c_b.max().item()) - float(R_c_b.min().item())
+
+    stats = {
+        "min":             float(mask.min().item()),
+        "max":             float(mask.max().item()),
+        "mean":            float(mask.mean().item()),
+        "std":             float(mask.std().item()),
+        "entropy":         entropy,
+        "norm_entropy":    entropy / max_entropy,   # 1.0 = perfectly uniform
+        "raw_I_mean":      float(raw_I.mean().item()),
+        "raw_I_max":       float(raw_I.max().item()),
+        "reward_spread":   reward_spread,
+        "n_valid_losers":  n_valid,
+    }
+    return mask, raw_I, stats
+
+
 # ---------------------------------------------------------------------------
 # Comparison baselines
 # ---------------------------------------------------------------------------
+
+
+def make_diversity_mask(
+    tokens_b:    torch.Tensor,   # (G, seq_len) int64
+    latent_size: int   = 16,
+    mask_floor:  float = 0.30,
+) -> torch.Tensor:
+    """
+    Pure token diversity baseline: fraction of generations that differ from
+    the mode token at each position (no reward weighting).
+    Useful for checking whether CARGO adds signal beyond raw diversity.
+    """
+    G, seq_len = tokens_b.shape
+    device = tokens_b.device
+
+    # mode token per position
+    mode, _ = tokens_b.mode(dim=0)   # (seq_len,)
+    diversity = (tokens_b != mode.unsqueeze(0)).float().mean(dim=0)  # (seq_len,)
+
+    I_2d     = diversity.reshape(1, 1, latent_size, latent_size)
+    I_smooth = F.avg_pool2d(I_2d, kernel_size=3, stride=1, padding=1).reshape(seq_len)
+
+    I_min, I_max = I_smooth.min(), I_smooth.max()
+    if (I_max - I_min).item() > 1e-6:
+        I_norm = (I_smooth - I_min) / (I_max - I_min)
+    else:
+        I_norm = torch.full_like(I_smooth, 0.5)
+
+    return mask_floor + (1.0 - mask_floor) * I_norm
 
 def make_random_mask(
     seq_len:    int,
@@ -113,19 +213,19 @@ def make_early_token_mask(
 
 def overlay_mask_on_image(
     pil_img,
-    mask_256:    torch.Tensor,   # (256,) or (16,16) float in [0,1]
+    mask_256:    torch.Tensor,   # (256,) or (16,16) float in [mask_floor,1]
     latent_size: int   = 16,
     alpha:       float = 0.55,
     colormap:    str   = "hot",
+    stats:       dict  = None,   # if provided, annotate stats on image
+    title:       str   = "",
 ) -> "PIL.Image.Image":
     """
     Resize 16×16 mask to image resolution, blend as heatmap overlay.
-    mask_256 values: higher = more important token (brighter in heatmap).
-    alpha: heatmap opacity (0 = original, 1 = full heatmap).
-    colormap: any matplotlib colormap name.
+    Optionally annotate min/max/mean/std/norm_entropy from a stats dict.
     """
     import numpy as np
-    from PIL import Image
+    from PIL import Image, ImageDraw, ImageFont
 
     mask = mask_256.detach().cpu().float()
     if mask.ndim == 1:
@@ -146,4 +246,63 @@ def overlay_mask_on_image(
     orig_np  = np.array(pil_img.convert("RGB")).astype(np.float32)
     heat_np  = np.array(heat_pil).astype(np.float32)
     blended  = np.clip((1 - alpha) * orig_np + alpha * heat_np, 0, 255).astype(np.uint8)
-    return Image.fromarray(blended, "RGB")
+    out = Image.fromarray(blended, "RGB")
+
+    if stats or title:
+        W, H = out.size
+        lines = []
+        if title:
+            lines.append(title)
+        if stats:
+            lines.append(
+                f"μ={stats['mean']:.3f} σ={stats['std']:.3f} "
+                f"H={stats['norm_entropy']:.3f} spread={stats.get('reward_spread', 0):.3f}"
+            )
+            lines.append(
+                f"min={stats['min']:.3f} max={stats['max']:.3f} "
+                f"valid={stats.get('n_valid_losers', '?')}"
+            )
+        lh = 14
+        strip = Image.new("RGB", (W, lh * len(lines) + 4), (20, 20, 20))
+        draw  = ImageDraw.Draw(strip)
+        try:
+            font = ImageFont.truetype("DejaVuSans.ttf", 11)
+        except Exception:
+            font = ImageFont.load_default()
+        for i, ln in enumerate(lines):
+            draw.text((3, 2 + i * lh), ln, fill=(220, 220, 100), font=font)
+        canvas = Image.new("RGB", (W, H + strip.height))
+        canvas.paste(out, (0, 0))
+        canvas.paste(strip, (0, H))
+        return canvas
+
+    return out
+
+
+def make_raw_heatmap(
+    mask_256:    torch.Tensor,   # (seq_len,) or (latent,latent)
+    latent_size: int  = 16,
+    out_size:    int  = 256,
+    colormap:    str  = "hot",
+) -> "PIL.Image.Image":
+    """
+    Pure colormap image of the mask values (no image blend).
+    Useful when the overlay hides weak structure.
+    """
+    import numpy as np
+    from PIL import Image
+
+    mask = mask_256.detach().cpu().float()
+    if mask.ndim == 1:
+        mask = mask.reshape(latent_size, latent_size)
+    m_np = mask.numpy()
+    m_np = (m_np - m_np.min()) / max(m_np.max() - m_np.min(), 1e-6)
+
+    try:
+        import matplotlib.cm as mcm
+        cmap  = mcm.get_cmap(colormap)
+        rgb   = (cmap(m_np)[:, :, :3] * 255).astype(np.uint8)
+    except Exception:
+        rgb = (np.stack([m_np, np.zeros_like(m_np), 1.0 - m_np], axis=-1) * 255).astype(np.uint8)
+
+    return Image.fromarray(rgb, "RGB").resize((out_size, out_size), Image.NEAREST)

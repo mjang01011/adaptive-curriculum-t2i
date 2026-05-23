@@ -87,19 +87,83 @@ def _make_image_grid(images, labels, cols=4):
     return grid
 
 
+def _annotate_pil(pil_img, lines, bg=(20, 20, 20), fg=(220, 220, 100)):
+    """Attach a text strip below a PIL image."""
+    from PIL import Image, ImageDraw, ImageFont
+    W, H = pil_img.size
+    lh   = 14
+    strip = Image.new("RGB", (W, lh * len(lines) + 4), bg)
+    draw  = ImageDraw.Draw(strip)
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", 11)
+    except Exception:
+        font = ImageFont.load_default()
+    for i, ln in enumerate(lines):
+        draw.text((3, 2 + i * lh), ln[:55], fill=fg, font=font)
+    canvas = Image.new("RGB", (W, H + strip.height))
+    canvas.paste(pil_img, (0, 0))
+    canvas.paste(strip, (0, H))
+    return canvas
+
+
+def _diff_heatmap(winner_tokens, all_tokens_list, R_c, latent_size, out_size=256):
+    """
+    Pixel heatmap of token positions that differ between winner and losers,
+    margin-weighted. Returns a PIL image at out_size × out_size.
+    """
+    import numpy as np
+    from PIL import Image
+    import torch.nn.functional as F
+
+    winner_idx = int(R_c.argmax().item())
+    seq_len    = winner_tokens.shape[0]
+    I = torch.zeros(seq_len, dtype=torch.float32)
+    n = 0
+    for g, tok in enumerate(all_tokens_list):
+        if g == winner_idx:
+            continue
+        margin = max(float(R_c[winner_idx]) - float(R_c[g]), 0.0)
+        if margin < 1e-6:
+            continue
+        I += (winner_tokens != tok).float().cpu() * margin
+        n += 1
+    if n > 0:
+        I = I / n
+
+    I_2d = I.reshape(1, 1, latent_size, latent_size)
+    I_sm = F.avg_pool2d(I_2d, 3, 1, 1).reshape(latent_size, latent_size).numpy()
+    I_sm = (I_sm - I_sm.min()) / max(I_sm.max() - I_sm.min(), 1e-6)
+
+    try:
+        import matplotlib.cm as mcm
+        rgb = (mcm.get_cmap("hot")(I_sm)[:, :, :3] * 255).astype(np.uint8)
+    except Exception:
+        rgb = (np.stack([I_sm, np.zeros_like(I_sm), 1 - I_sm], -1) * 255).astype(np.uint8)
+
+    return Image.fromarray(rgb).resize((out_size, out_size), Image.NEAREST)
+
+
 def run_diagnostics_for_item(
     item, wrapper, reward_model, args, out_dir: Path
 ):
     import contextlib
     from autoregressive.models.generate import generate
-    from CARGO.masks   import compute_cargo_mask, overlay_mask_on_image
+    from CARGO.masks import (
+        compute_cargo_mask_with_stats,
+        make_diversity_mask,
+        make_early_token_mask,
+        make_random_mask,
+        overlay_mask_on_image,
+        make_raw_heatmap,
+    )
     from CARGO.rewards import META_KEYS
     import torchvision.transforms.functional as TF
-    from torchvision.utils import save_image
+    from PIL import Image
 
     out_dir.mkdir(parents=True, exist_ok=True)
     G      = args.num_generations
     device = wrapper.device
+    ls     = wrapper.latent_size
 
     # ── Generate G images ─────────────────────────────────────────────────────
     wrapper.gpt.eval()
@@ -114,14 +178,14 @@ def run_diagnostics_for_item(
     with torch.no_grad():
         c_indices, c_emb_masks = wrapper._get_conditioning([item])
 
-    qzshape = [1, wrapper.codebook_embed_dim, wrapper.latent_size, wrapper.latent_size]
+    qzshape    = [1, wrapper.codebook_embed_dim, ls, ls]
     all_tokens = []
     all_pils   = []
 
     with torch.no_grad(), _sdpa_ctx():
         for _ in range(G):
-            idx_sample = generate(
-                wrapper.gpt, c_indices, wrapper.latent_size ** 2,
+            idx = generate(
+                wrapper.gpt, c_indices, ls ** 2,
                 c_emb_masks,
                 cfg_scale=wrapper.cfg_scale_train,
                 temperature=wrapper.temperature,
@@ -129,46 +193,112 @@ def run_diagnostics_for_item(
                 top_p=wrapper.top_p,
                 sample_logits=True,
             )  # (1, seq_len)
-            all_tokens.append(idx_sample)
-            decoded = wrapper.vq_model.decode_code(idx_sample, qzshape)
+            all_tokens.append(idx)
+            decoded = wrapper.vq_model.decode_code(idx, qzshape)
             img_t = (decoded[0].float().clamp(-1, 1) + 1) / 2
             all_pils.append(TF.to_pil_image(img_t.cpu()))
 
     wrapper._disable_kv_cache()
+
+    stacked_tokens = torch.stack(all_tokens, dim=0).squeeze(1).to(device)  # (G, seq_len)
+    seq_len = stacked_tokens.shape[1]
 
     # ── Score all G images ────────────────────────────────────────────────────
     pairs   = [(pil, item) for pil in all_pils]
     results = reward_model.score_images_batch(pairs, mode=args.reward_mode)
 
     scores = [float(r["score"]) for r in results]
-    comp_matrices = {}   # key → (G,) list of floats
-
+    comp_matrices = {}
     for g, r in enumerate(results):
         for k, v in (r.get("component_scores") or {}).items():
             comp_matrices.setdefault(k, []).append(float(v))
 
-    # ── Save images sorted by score ───────────────────────────────────────────
-    order = sorted(range(G), key=lambda i: scores[i], reverse=True)
-    all_pils[order[0]].save(str(out_dir / "best.png"))
-    all_pils[order[-1]].save(str(out_dir / "worst.png"))
+    order      = sorted(range(G), key=lambda i: scores[i], reverse=True)
+    best_idx   = order[0]
+    worst_idx  = order[-1]
+    best_pil   = all_pils[best_idx]
+    worst_pil  = all_pils[worst_idx]
+    best_toks  = stacked_tokens[best_idx]
 
-    # ── Compute and save CARGO masks for primary components ───────────────────
-    stacked_tokens = torch.stack(all_tokens, dim=0).squeeze(1)  # (G, seq_len)
+    # ── Save best / worst ─────────────────────────────────────────────────────
+    best_pil.save(str(out_dir / "best.png"))
+    worst_pil.save(str(out_dir / "worst.png"))
 
-    cargo_keys = [k for k in comp_matrices if k not in META_KEYS]
+    # ── Baselines (computed once; shared across components) ───────────────────
+    div_mask   = make_diversity_mask(stacked_tokens, latent_size=ls,
+                                      mask_floor=args.cargo_mask_floor)
+    early_mask = make_early_token_mask(seq_len, mask_floor=args.cargo_mask_floor,
+                                        device=device)
+    rand_mask  = make_random_mask(seq_len, mask_floor=args.cargo_mask_floor,
+                                   device=device, seed=0)
+
+    # ── Per-component panels ──────────────────────────────────────────────────
+    cargo_keys   = [k for k in comp_matrices if k not in META_KEYS]
+    all_stats    = {}
+    W256         = best_pil.size[0]
+
     for key in cargo_keys:
-        R_c = torch.tensor(comp_matrices[key], dtype=torch.float32).to(device)
-        mask = compute_cargo_mask(
-            stacked_tokens.to(device), R_c,
-            latent_size=wrapper.latent_size,
-            mask_floor=args.cargo_mask_floor,
-        )
-        overlaid = overlay_mask_on_image(all_pils[order[0]], mask,
-                                          latent_size=wrapper.latent_size)
-        safe_key = key.replace("/", "_")
-        overlaid.save(str(out_dir / f"cargo_{safe_key}_mask.png"))
+        R_c  = torch.tensor(comp_matrices[key], dtype=torch.float32, device=device)
+        safe = key.replace("/", "_")
 
-    # ── Build annotated grid of all G images ──────────────────────────────────
+        # CARGO mask + stats
+        mask, raw_I, stats = compute_cargo_mask_with_stats(
+            stacked_tokens, R_c, latent_size=ls, mask_floor=args.cargo_mask_floor
+        )
+        all_stats[key] = stats
+
+        # ── Overlay with stats annotation ─────────────────────────────────────
+        overlay = overlay_mask_on_image(best_pil, mask, latent_size=ls,
+                                         stats=stats, title=f"CARGO: {key}")
+        overlay.save(str(out_dir / f"cargo_{safe}_mask.png"))
+
+        # ── Raw heatmap (no image, shows true structure) ──────────────────────
+        make_raw_heatmap(mask, latent_size=ls, out_size=W256).save(
+            str(out_dir / f"cargo_{safe}_raw.png")
+        )
+        make_raw_heatmap(raw_I if raw_I.max() > 1e-8 else torch.ones(seq_len, device=device) * 0.5,
+                         latent_size=ls, out_size=W256).save(
+            str(out_dir / f"cargo_{safe}_raw_I.png")
+        )
+
+        # ── Comparison panel: best | worst | diff | CARGO | diversity | early ──
+        reward_spread = float(R_c.max() - R_c.min())
+        diff_img = _diff_heatmap(best_toks, [stacked_tokens[g] for g in range(G)],
+                                  R_c, ls, out_size=W256)
+
+        panels = [
+            _annotate_pil(best_pil,   [f"BEST  r={scores[best_idx]:.3f}",  key]),
+            _annotate_pil(worst_pil,  [f"WORST r={scores[worst_idx]:.3f}", f"spread={reward_spread:.3f}"]),
+            _annotate_pil(diff_img,   ["winner-loser diff (raw I)", f"n_valid={stats['n_valid_losers']}"]),
+            overlay_mask_on_image(best_pil, mask,      latent_size=ls,
+                                   stats=stats, title="CARGO"),
+            overlay_mask_on_image(best_pil, div_mask,  latent_size=ls,
+                                   title="diversity (no reward weighting)"),
+            overlay_mask_on_image(best_pil, early_mask, latent_size=ls,
+                                   title="early-token baseline"),
+        ]
+
+        # Pad all to same height then concatenate horizontally
+        max_h = max(p.size[1] for p in panels)
+        padded = []
+        for p in panels:
+            if p.size[1] < max_h:
+                canvas = Image.new("RGB", (p.size[0], max_h), (40, 40, 40))
+                canvas.paste(p, (0, 0))
+                padded.append(canvas)
+            else:
+                padded.append(p)
+
+        row_w = sum(p.size[0] for p in padded)
+        panel_img = Image.new("RGB", (row_w, max_h))
+        x = 0
+        for p in padded:
+            panel_img.paste(p, (x, 0))
+            x += p.size[0]
+
+        panel_img.save(str(out_dir / f"panel_{safe}.png"))
+
+    # ── Annotated grid of all G images ────────────────────────────────────────
     grid_labels = []
     for g in range(G):
         comp_str = "  ".join(
@@ -176,21 +306,32 @@ def run_diagnostics_for_item(
             for k in sorted(comp_matrices)
             if k not in META_KEYS
         )
-        grid_labels.append(f"r={scores[g]:.3f}  {comp_str[:30]}")
+        grid_labels.append(f"r={scores[g]:.3f}  {comp_str[:28]}")
 
     grid = _make_image_grid(all_pils, grid_labels, cols=min(4, G))
     grid.save(str(out_dir / "grid.png"))
 
-    # ── Save raw component rewards ────────────────────────────────────────────
+    # ── Save raw data ─────────────────────────────────────────────────────────
     with open(out_dir / "comp_rewards.json", "w") as f:
         json.dump({
-            "prompt": item.text,
-            "scores": scores,
+            "prompt":        item.text,
+            "scores":        scores,
             "comp_matrices": comp_matrices,
+            "mask_stats":    all_stats,
         }, f, indent=2)
 
-    print(f"  [{item.id}] best={max(scores):.3f}  worst={min(scores):.3f}  "
-          f"spread={max(scores)-min(scores):.3f}")
+    # ── Console summary ───────────────────────────────────────────────────────
+    spread = max(scores) - min(scores)
+    stat_lines = [
+        f"  [{item.id}] best={max(scores):.3f}  worst={min(scores):.3f}  "
+        f"spread={spread:.3f}"
+    ]
+    for k, s in all_stats.items():
+        stat_lines.append(
+            f"    {k:<26} std={s['std']:.4f}  H_norm={s['norm_entropy']:.3f}"
+            f"  raw_I_max={s['raw_I_max']:.4f}  valid={s['n_valid_losers']}"
+        )
+    print("\n".join(stat_lines))
 
 
 def main():
