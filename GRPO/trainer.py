@@ -188,25 +188,25 @@ class GRPOTrainer:
         wrapper._disable_kv_cache()
         t_gen = time.perf_counter() - t_gen_start
 
-        # ── score all B*G images ──────────────────────────────────────
+        # ── score all B*G images (batched per sample round) ──────────
         t_score_start = time.perf_counter()
         rewards = torch.zeros(B, G)
         sample_details = []
         for s in range(G):
-            for i, item in enumerate(batch):
-                pil_img = all_pil_imgs[s * B + i]
-                result = reward_model.score_image(pil_img, item, mode=reward_mode)
+            pairs = [(all_pil_imgs[s * B + i], batch[i]) for i in range(B)]
+            results = reward_model.score_images_batch(pairs, mode=reward_mode)
+            for i, (item, result) in enumerate(zip(batch, results)):
                 score = float(result["score"])
                 rewards[i, s] = score
                 sample_details.append({
-                    "prompt_id":       item.id,
-                    "prompt":          item.text,
-                    "bucket":          item.bucket,
-                    "sample_idx":      s,
-                    "reward":          score,
-                    "question_scores": result.get("question_scores", []),
+                    "prompt_id":        item.id,
+                    "prompt":           item.text,
+                    "bucket":           item.bucket,
+                    "sample_idx":       s,
+                    "reward":           score,
+                    "question_scores":  result.get("question_scores", []),
                     "component_scores": result.get("component_scores", {}),
-                    "reward_debug":    result.get("reward_debug", {}),
+                    "reward_debug":     result.get("reward_debug", {}),
                 })
         t_score = time.perf_counter() - t_score_start
 

@@ -180,6 +180,7 @@ class Qwen3VLRewardModel(RewardModel):
             self.model_id,
             torch_dtype=torch.bfloat16,
             device_map=self.device,
+            attn_implementation="flash_attention_2",
         )
         self._model.eval()
 
@@ -217,11 +218,49 @@ class Qwen3VLRewardModel(RewardModel):
 
     def _generate_text(self, inputs, max_new_tokens: int) -> str:
         import torch
-        with torch.no_grad():
+        with torch.inference_mode():
             out_ids = self._model.generate(**inputs, max_new_tokens=max_new_tokens)
         return self._processor.batch_decode(
             out_ids[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True
         )[0].strip()
+
+    def _build_batch_inputs(self, images_and_prompts: list):
+        """Build processor inputs for a list of (image, prompt_text) pairs."""
+        from qwen_vl_utils import process_vision_info
+        self._load()
+        all_texts = []
+        all_image_inputs = []
+        for image, prompt_text in images_and_prompts:
+            if isinstance(image, str):
+                image_content = {"type": "image", "image": Path(image).as_uri()}
+            else:
+                image_content = {"type": "image", "image": image}
+            messages = [{"role": "user", "content": [
+                image_content, {"type": "text", "text": prompt_text}
+            ]}]
+            text = self._processor.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+            image_inputs, _ = process_vision_info(messages)
+            all_texts.append(text)
+            all_image_inputs.extend(image_inputs)
+        return self._processor(
+            text=all_texts,
+            images=all_image_inputs,
+            return_tensors="pt",
+            padding=True,
+        ).to(next(self._model.parameters()).device)
+
+    def _generate_text_batch(self, images_and_prompts: list, max_new_tokens: int) -> list:
+        """One generate() call for a batch of (image, prompt) pairs. Returns list of strings."""
+        import torch
+        inputs = self._build_batch_inputs(images_and_prompts)
+        with torch.inference_mode():
+            out_ids = self._model.generate(**inputs, max_new_tokens=max_new_tokens)
+        input_len = inputs["input_ids"].shape[1]
+        return [t.strip() for t in self._processor.batch_decode(
+            out_ids[:, input_len:], skip_special_tokens=True
+        )]
 
     def _generate_with_scores(self, inputs, max_new_tokens: int):
         """Generate and return (text, scores) for first-token probability extraction."""
@@ -318,6 +357,160 @@ class Qwen3VLRewardModel(RewardModel):
             answers = parse_vlm_json_answers(raw2, n)
 
         return answers if answers is not None else ["uncertain"] * n
+
+    def answer_all_questions_once_batch(self, images_and_question_lists: list) -> list:
+        """
+        One generate() call for a batch of (image, questions_list) pairs.
+        Returns list of answer-lists, one per image.
+        Any image whose JSON fails to parse is retried individually.
+        """
+        if not images_and_question_lists:
+            return []
+        n_list = [len(qs) for _, qs in images_and_question_lists]
+        prompts = [build_vlm_question_prompt(qs) for _, qs in images_and_question_lists]
+        max_tokens = max(max(n_list) * 50, 256)
+
+        raw_texts = self._generate_text_batch(
+            [(img, p) for (img, _), p in zip(images_and_question_lists, prompts)],
+            max_new_tokens=max_tokens,
+        )
+
+        results = []
+        for raw, n, (img, qs), prompt in zip(
+            raw_texts, n_list, images_and_question_lists, prompts
+        ):
+            answers = parse_vlm_json_answers(raw, n)
+            if answers is None:
+                retry = prompt + "\n\nRespond ONLY with valid JSON. No additional text."
+                inputs2 = self._build_inputs(img, retry)
+                raw2 = self._generate_text(inputs2, max_new_tokens=max_tokens)
+                answers = parse_vlm_json_answers(raw2, n)
+            results.append(answers if answers is not None else ["uncertain"] * n)
+        return results
+
+    def score_images_batch(self, images_and_items: list, mode: str) -> list:
+        """
+        Score a batch of (image, item) pairs with one VLM generate() call.
+        Returns a list of score dicts in the same order as input.
+
+        Logit-based modes (true_soft, qwen_logit_grpo_target_heavy) fall back
+        to sequential score_image() since they need per-question logits.
+        """
+        if not images_and_items:
+            return []
+
+        # Logit modes can't batch easily — fall back
+        if mode in ("true_soft", "qwen_logit_grpo_target_heavy"):
+            return [self.score_image(img, item, mode=mode)
+                    for img, item in images_and_items]
+
+        # Select question set per item
+        def _get_questions(item):
+            if mode in ("pseudo_soft_grpo", "pseudo_soft_grpo_target_heavy") \
+                    or mode in GATED_V2_MODES:
+                qs = getattr(item, "grpo_reward_questions", []) or []
+                return qs if qs else item.target_questions
+            return item.target_questions
+
+        questions_list = [_get_questions(item) for _, item in images_and_items]
+
+        t0 = time.time()
+        answers_list = self.answer_all_questions_once_batch(
+            [(img, qs) for (img, _), qs in zip(images_and_items, questions_list)]
+        )
+        vlm_seconds = time.time() - t0
+        per_img_s = vlm_seconds / len(images_and_items)
+
+        self._total_vlm_calls += 1
+        self._total_questions_answered += sum(len(qs) for qs in questions_list)
+        self._total_vlm_seconds += vlm_seconds
+
+        results = []
+        for (_, item), questions, answers in zip(
+            images_and_items, questions_list, answers_list
+        ):
+            n = len(questions)
+
+            # Build per-question weights (same logic as score_image)
+            if mode in ("pseudo_soft_grpo_target_heavy",):
+                raw_w = [_target_heavy_weight(getattr(q, "q_type", "")) for q in questions]
+                total = sum(raw_w) or 1.0
+                eff_w = [w / total for w in raw_w]
+            elif mode == "pseudo_soft_grpo":
+                raw_w = [getattr(q, "weight", 1.0) for q in questions]
+                total = sum(raw_w) or 1.0
+                eff_w = [w / total for w in raw_w]
+            else:
+                eff_w = [1.0 / n] * n if n > 0 else []
+
+            question_scores = []
+            for pred, q, w in zip(answers, questions, eff_w):
+                expected = q.answer.lower()
+                q_score = _pseudo_soft_score(pred, expected) \
+                    if mode != "hard_target" else _hard_score(pred, expected)
+                question_scores.append({
+                    "question": q.question, "expected": expected,
+                    "predicted": pred, "correct": pred == expected,
+                    "score": q_score, "weight": w,
+                    "q_type": getattr(q, "q_type", "unknown"),
+                })
+
+            scalar = sum(qs["score"] * qs["weight"] for qs in question_scores)
+
+            # Component breakdown
+            comps: dict = {}
+            for qs in question_scores:
+                qt = qs["q_type"]
+                comps.setdefault(qt, {"s": 0.0, "w": 0.0})
+                comps[qt]["s"] += qs["score"] * qs["weight"]
+                comps[qt]["w"] += qs["weight"]
+            component_scores = {
+                qt: v["s"] / v["w"] if v["w"] > 0 else 0.0
+                for qt, v in comps.items()
+            }
+
+            # Gated-v2 modes: override scalar with formula
+            if mode in GATED_V2_MODES:
+                type_scores: dict = {}
+                type_counts: dict = {}
+                n_uncertain = 0
+                for pred, q in zip(answers, questions):
+                    qt = getattr(q, "q_type", "unknown")
+                    s = _pseudo_soft_score(pred, q.answer.lower())
+                    type_scores[qt] = type_scores.get(qt, 0.0) + s
+                    type_counts[qt] = type_counts.get(qt, 0) + 1
+                    if pred == "uncertain":
+                        n_uncertain += 1
+                comp = {qt: type_scores[qt] / type_counts[qt] for qt in type_scores}
+                comp["uncertain_frac"] = n_uncertain / max(n, 1)
+                bucket = getattr(item, "bucket", "")
+                reward, debug = apply_gated_v2(mode, comp, bucket=bucket)
+                qs_v2 = [{
+                    "question": q.question, "expected": q.answer.lower(),
+                    "predicted": pred, "correct": pred == q.answer.lower(),
+                    "score": _pseudo_soft_score(pred, q.answer.lower()),
+                    "weight": 1.0, "q_type": getattr(q, "q_type", "unknown"),
+                } for pred, q in zip(answers, questions)]
+                results.append({
+                    "score": float(reward),
+                    "question_scores": qs_v2,
+                    "component_scores": comp,
+                    "mode": mode,
+                    "vlm_seconds": per_img_s,
+                    "num_questions": n,
+                    "reward_debug": {**debug, "reward_mode": mode},
+                })
+            else:
+                results.append({
+                    "score": float(scalar),
+                    "question_scores": question_scores,
+                    "component_scores": component_scores,
+                    "mode": mode,
+                    "vlm_seconds": per_img_s,
+                    "num_questions": n,
+                })
+
+        return results
 
     def score_image(self, image, item, mode: str = "hard_target") -> dict:
         # Select question set based on mode

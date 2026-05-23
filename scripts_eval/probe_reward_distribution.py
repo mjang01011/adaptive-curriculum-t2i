@@ -179,22 +179,26 @@ def main():
 
         print(f"[probe] sample {s+1}/{G} generated ({t_gen_all[-1]:.1f}s for {N} images)  scoring...")
 
+        # Decode all images for this sample
+        pil_imgs = []
         for pi, item in enumerate(sampled):
             img_t = (decoded[pi].float().clamp(-1, 1) + 1) / 2
             pil_img = TF.to_pil_image(img_t.cpu())
-
+            pil_imgs.append(pil_img)
             img_path = out_dir / f"p{pi:03d}_s{s:02d}_{item.id}.png"
             pil_img.save(str(img_path))
 
-            t_score_start = time.perf_counter()
-            r = reward_model.score_image(pil_img, item, mode=args.reward_mode)
-            h = reward_model.score_image(pil_img, item, mode="hard_target")
-            t_score_all.append(time.perf_counter() - t_score_start)
+        # Batch score all N images with both modes in one call each
+        t_score_start = time.perf_counter()
+        pairs = list(zip(pil_imgs, sampled))
+        r_list = reward_model.score_images_batch(pairs, mode=args.reward_mode)
+        h_list = reward_model.score_images_batch(pairs, mode="hard_target")
+        t_score_all.append(time.perf_counter() - t_score_start)
 
+        for pi, (item, r, h) in enumerate(zip(sampled, r_list, h_list)):
             group_rewards[pi][s] = r["score"]
             group_hard[pi][s]    = h["score"]
             group_comp[pi][s]    = r.get("component_scores", {})
-
             details_rows.append({
                 "prompt_id": item.id,
                 "prompt":    item.prompt,
@@ -207,8 +211,7 @@ def main():
 
         import statistics as _s
         mean_r = _s.mean(group_rewards[pi][s] for pi in range(N))
-        mean_st = _s.mean(t_score_all[-N:])
-        print(f"[probe] sample {s+1}/{G} scored  mean_reward={mean_r:.3f}  mean_score_t={mean_st:.1f}s/img")
+        print(f"[probe] sample {s+1}/{G} scored  mean_reward={mean_r:.3f}  batch_score_t={t_score_all[-1]:.1f}s ({t_score_all[-1]/N:.1f}s/img)")
 
     # ── Compute metrics ──────────────────────────────────────────────────────
     import statistics
