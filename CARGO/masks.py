@@ -119,22 +119,44 @@ def compute_cargo_mask_with_stats(
 
     mask = mask_floor + (1.0 - mask_floor) * I_norm
 
-    # entropy of mask treated as a distribution (higher = more uniform)
-    p = mask / mask.sum().clamp(min=1e-9)
-    entropy = float(-( p * (p + 1e-12).log() ).sum().item())
-    max_entropy = float(math.log(seq_len))
-
     reward_spread = float(R_c_b.max().item()) - float(R_c_b.min().item())
 
+    # --- Stats on raw_I (before smoothing / normalization / floor) ---
+    # These are the informative metrics.  The final mask is always in
+    # [mask_floor, 1.0] so its std/entropy are dominated by normalization
+    # artifacts and say nothing about spatial structure.
+    ri_mean = float(raw_I.mean().item())
+    ri_std  = float(raw_I.std().item())
+    ri_max  = float(raw_I.max().item())
+    ri_cv   = ri_std / (ri_mean + 1e-8)     # coeff of variation; high = concentrated
+
+    # Gini coefficient of raw_I — 0 = perfectly uniform, 1 = all mass in one token
+    ri_sorted = raw_I.sort().values.cpu()
+    n_f   = float(seq_len)
+    cumsum = ri_sorted.cumsum(0)
+    ri_gini = float(
+        1.0 - 2.0 * cumsum.sum().item() / (n_f * ri_sorted.sum().item() + 1e-9) + 1.0 / n_f
+    )
+
+    # Fraction of total raw_I in the top-10% of tokens (top 26 of 256)
+    top_k  = max(1, seq_len // 10)
+    ri_top10_frac = float(
+        ri_sorted[-top_k:].sum().item() / (ri_sorted.sum().item() + 1e-9)
+    )
+
+    # --- Stats on raw_I_smooth (after spatial smoothing, before floor/norm) ---
+    I_2d_s   = raw_I.reshape(1, 1, latent_size, latent_size)
+    I_sm     = F.avg_pool2d(I_2d_s, 3, 1, 1).reshape(seq_len).cpu()
+    sm_cv    = float(I_sm.std().item()) / (float(I_sm.mean().item()) + 1e-8)
+
     stats = {
-        "min":             float(mask.min().item()),
-        "max":             float(mask.max().item()),
-        "mean":            float(mask.mean().item()),
-        "std":             float(mask.std().item()),
-        "entropy":         entropy,
-        "norm_entropy":    entropy / max_entropy,   # 1.0 = perfectly uniform
-        "raw_I_mean":      float(raw_I.mean().item()),
-        "raw_I_max":       float(raw_I.max().item()),
+        # Raw importance before any processing — primary signal quality metrics
+        "raw_I_max":       ri_max,
+        "raw_I_mean":      ri_mean,
+        "raw_I_cv":        ri_cv,       # high (>1) = spatially concentrated
+        "raw_I_gini":      ri_gini,     # high (→1) = concentrated, low (→0) = diffuse
+        "raw_I_top10_frac": ri_top10_frac,  # >0.3 means top-10% tokens hold most signal
+        "smooth_cv":       sm_cv,       # CV after spatial smoothing
         "reward_spread":   reward_spread,
         "n_valid_losers":  n_valid,
     }
@@ -255,12 +277,13 @@ def overlay_mask_on_image(
             lines.append(title)
         if stats:
             lines.append(
-                f"μ={stats['mean']:.3f} σ={stats['std']:.3f} "
-                f"H={stats['norm_entropy']:.3f} spread={stats.get('reward_spread', 0):.3f}"
+                f"cv={stats.get('raw_I_cv',0):.2f}  gini={stats.get('raw_I_gini',0):.2f}"
+                f"  top10%={stats.get('raw_I_top10_frac',0):.2f}"
+                f"  spread={stats.get('reward_spread',0):.3f}"
             )
             lines.append(
-                f"min={stats['min']:.3f} max={stats['max']:.3f} "
-                f"valid={stats.get('n_valid_losers', '?')}"
+                f"raw_I_max={stats.get('raw_I_max',0):.3f}"
+                f"  valid={stats.get('n_valid_losers','?')}"
             )
         lh = 14
         strip = Image.new("RGB", (W, lh * len(lines) + 4), (20, 20, 20))

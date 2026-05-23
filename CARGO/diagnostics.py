@@ -327,9 +327,17 @@ def run_diagnostics_for_item(
         f"spread={spread:.3f}"
     ]
     for k, s in all_stats.items():
+        # Interpret signal quality:
+        #   raw_I_cv > 1.0  → concentrated peaks (good)
+        #   raw_I_gini > 0.4 → unequal distribution (good)
+        #   top10_frac > 0.30 → top tokens capture most importance (good)
+        signal = "STRONG" if s["raw_I_cv"] > 1.5 and s["raw_I_gini"] > 0.4 else \
+                 "MODERATE" if s["raw_I_cv"] > 0.5 and s["raw_I_max"] > 0.5 else \
+                 "WEAK"
         stat_lines.append(
-            f"    {k:<26} std={s['std']:.4f}  H_norm={s['norm_entropy']:.3f}"
-            f"  raw_I_max={s['raw_I_max']:.4f}  valid={s['n_valid_losers']}"
+            f"    {k:<26} raw_I_max={s['raw_I_max']:.3f}  cv={s['raw_I_cv']:.2f}"
+            f"  gini={s['raw_I_gini']:.2f}  top10%={s['raw_I_top10_frac']:.2f}"
+            f"  valid={s['n_valid_losers']}  [{signal}]"
         )
     print("\n".join(stat_lines))
 
