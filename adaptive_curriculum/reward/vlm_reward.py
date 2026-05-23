@@ -267,26 +267,40 @@ class Qwen3VLRewardModel(RewardModel):
         import os
         import torch
         from transformers import AutoProcessor, AutoModelForImageTextToText
-        # Newer huggingface_hub validates repo_id format before checking if the
-        # string is a local path, so absolute paths fail the namespace/repo check.
-        # Passing local_files_only=True skips the hub lookup entirely.
+
+        # huggingface_hub ≥0.25 runs validate_repo_id as a decorator on
+        # hf_hub_download *before* any local_files_only check, so absolute local
+        # paths fail the namespace/repo_name format check.  For local directories
+        # we temporarily replace the validator with a no-op so cached_files can
+        # fall back to reading directly from the local directory.
         _local = os.path.isdir(self.model_id)
-        _from_pretrained_kwargs = {"local_files_only": True} if _local else {}
-        self._processor = AutoProcessor.from_pretrained(self.model_id, **_from_pretrained_kwargs)
-        self._processor.tokenizer.padding_side = "left"
+        _orig_validate = None
+        if _local:
+            try:
+                import huggingface_hub.utils._validators as _hfv
+                _orig_validate = _hfv.validate_repo_id
+                _hfv.validate_repo_id = lambda _x: None
+            except (ImportError, AttributeError):
+                pass
+
         try:
-            import flash_attn  # noqa: F401
-            attn_impl = "flash_attention_2"
-        except ImportError:
-            attn_impl = "sdpa"
-        self._model = AutoModelForImageTextToText.from_pretrained(
-            self.model_id,
-            dtype=torch.bfloat16,
-            device_map=self.device,
-            attn_implementation=attn_impl,
-            **_from_pretrained_kwargs,
-        )
-        self._model.eval()
+            self._processor = AutoProcessor.from_pretrained(self.model_id)
+            self._processor.tokenizer.padding_side = "left"
+            try:
+                import flash_attn  # noqa: F401
+                attn_impl = "flash_attention_2"
+            except ImportError:
+                attn_impl = "sdpa"
+            self._model = AutoModelForImageTextToText.from_pretrained(
+                self.model_id,
+                dtype=torch.bfloat16,
+                device_map=self.device,
+                attn_implementation=attn_impl,
+            )
+            self._model.eval()
+        finally:
+            if _orig_validate is not None:
+                _hfv.validate_repo_id = _orig_validate
 
     def _build_inputs(self, image, prompt_text: str):
         """Build model inputs from image (path str or PIL) and full prompt text."""
