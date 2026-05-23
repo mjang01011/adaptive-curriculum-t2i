@@ -172,8 +172,8 @@ def run_diagnostics_for_item(
     grid_labels = []
     for g in range(G):
         comp_str = "  ".join(
-            f"{k[:6]}={v:.2f}"
-            for k, v in sorted(comp_matrices.items())
+            f"{k[:6]}={comp_matrices[k][g]:.2f}"
+            for k in sorted(comp_matrices)
             if k not in META_KEYS
         )
         grid_labels.append(f"r={scores[g]:.3f}  {comp_str[:30]}")
