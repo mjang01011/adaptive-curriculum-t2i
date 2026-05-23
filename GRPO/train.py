@@ -81,8 +81,13 @@ def parse_args():
     p.add_argument("--top-p",           type=float, default=1.0)
 
     # ── reward ───────────────────────────────────────────────────────────────
-    p.add_argument("--reward-mode",     default="pseudo_soft_grpo_target_heavy")
-    p.add_argument("--qwen-model",      default=None, help="HF model ID or local path for Qwen3-VL reward (default: Qwen/Qwen3-VL-4B-Instruct)")
+    p.add_argument("--reward-mode",              default="pseudo_soft_grpo_target_heavy")
+    p.add_argument("--qwen-model",               default=None,
+                   help="HF model ID or local path for Qwen3-VL reward")
+    p.add_argument("--qwen-logit-prompt-style",  default="rubric_v2",
+                   choices=["simple", "rubric_v2"],
+                   help="rubric_v2 (default): rubric-based statement verification for contrastive modes; "
+                        "simple: bare yes/no question suffix (legacy gated modes)")
 
     # ── logprob mode ─────────────────────────────────────────────────────────
     p.add_argument("--logprob-mode",    default="cfg", choices=["conditional", "cfg"],
@@ -258,12 +263,18 @@ def run_val(
                 caption=f"step={step}  hard={hard_score:.2f}  {prompt_short}",
             )
 
-    hard_scores = [r["hard_score"] for r in results]
-    mean_hard   = sum(hard_scores) / max(len(hard_scores), 1)
+    hard_scores   = [r["hard_score"]  for r in results]
+    smooth_scores = [r["grpo_score"]  for r in results]
+    mean_hard     = sum(hard_scores)   / max(len(hard_scores), 1)
+    mean_smooth   = sum(smooth_scores) / max(len(smooth_scores), 1)
 
     if use_wandb:
         import wandb
-        log_dict = {**wandb_images, "val/mean_hard_reward": mean_hard}
+        log_dict = {
+            **wandb_images,
+            "val/mean_hard_reward":   mean_hard,
+            "val/mean_smooth_reward": mean_smooth,
+        }
         for k, vs in comp_accum.items():
             log_dict[f"val/comp/{k}"] = sum(vs) / len(vs)
         wandb.log(log_dict, step=step)
@@ -386,6 +397,11 @@ def main():
     step = 0
     t0_total = time.time()
 
+    # EMA state for smooth W&B curves  (alpha=0.05 ≈ 20-step window)
+    _ema_alpha  = 0.05
+    _ema_reward = None   # scalar EMA
+    _ema_comps: dict = {}  # component key → EMA float
+
     print(f"[train] Starting GRPO training: {args.num_steps} steps, "
           f"B={args.batch_size}, G={args.num_generations}, "
           f"beta={args.beta}, epsilon={args.epsilon}, lr={args.lr}")
@@ -418,9 +434,26 @@ def main():
         metrics = trainer.train_step(batch, reward_model, reward_mode=args.reward_mode)
         step = metrics["step"]
 
-        # ── log reward details ────────────────────────────────────────────────
+        # ── log reward details + update EMA ──────────────────────────────────
+        sample_details = metrics.pop("sample_details")
+        # Update EMA reward
+        _ema_reward = (
+            metrics["mean_reward"] if _ema_reward is None
+            else _ema_alpha * metrics["mean_reward"] + (1 - _ema_alpha) * _ema_reward
+        )
+        # Update EMA component scores (average across batch samples)
+        _comp_batch: dict = {}
+        for d in sample_details:
+            for k, v in (d.get("component_scores") or {}).items():
+                _comp_batch.setdefault(k, []).append(v)
+        for k, vs in _comp_batch.items():
+            avg = sum(vs) / len(vs)
+            _ema_comps[k] = (
+                avg if k not in _ema_comps
+                else _ema_alpha * avg + (1 - _ema_alpha) * _ema_comps[k]
+            )
         with open(reward_details_path, "a") as f:
-            for d in metrics.pop("sample_details"):
+            for d in sample_details:
                 d["global_step"] = step
                 f.write(json.dumps(d) + "\n")
 
@@ -447,8 +480,11 @@ def main():
 
         if use_wandb:
             import wandb
-            wandb.log({k: v for k, v in metrics.items()
-                        if isinstance(v, (int, float))}, step=step)
+            log_dict = {k: v for k, v in metrics.items() if isinstance(v, (int, float))}
+            log_dict["train/mean_reward_ema"] = _ema_reward
+            for k, v in _ema_comps.items():
+                log_dict[f"train/ema/{k}"] = v
+            wandb.log(log_dict, step=step)
 
         # ── checkpoint ───────────────────────────────────────────────────────
         if step % args.save_every == 0:
