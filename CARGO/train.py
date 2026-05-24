@@ -77,6 +77,8 @@ def parse_args():
     # ── CARGO-specific ────────────────────────────────────────────────────────
     p.add_argument("--cargo-lambda-base", type=float, default=0.25,
                    help="Weight for scalar GRPO base term (0 = pure token-weighted, 1 = pure scalar GRPO)")
+    p.add_argument("--cargo-mask-source", default="pixel", choices=["pixel", "vq"],
+                   help="pixel (default): L1 RGB patch distances; vq: VQ token identity (ablation)")
     p.add_argument("--cargo-mask-floor", type=float, default=0.30,
                    help="Minimum token importance value (soft floor for CARGO masks)")
     p.add_argument("--elite-sft-alpha", type=float, default=0.0,
@@ -363,6 +365,7 @@ def main():
         logprob_mode=args.logprob_mode,
         cargo_lambda_base=args.cargo_lambda_base,
         cargo_mask_floor=args.cargo_mask_floor,
+        cargo_mask_source=args.cargo_mask_source,
         elite_sft_alpha=args.elite_sft_alpha,
         elite_sft_frac=args.elite_sft_frac,
     )

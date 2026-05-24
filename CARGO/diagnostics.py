@@ -47,6 +47,8 @@ def parse_args():
     p.add_argument("--num-prompts",     type=int, default=4)
     p.add_argument("--num-generations", type=int, default=8)
     p.add_argument("--output-dir",      required=True)
+    p.add_argument("--cargo-mask-source", default="pixel", choices=["pixel", "vq"],
+                   help="pixel (default): L1 RGB patch distances; vq: VQ token identity (ablation)")
     p.add_argument("--cargo-mask-floor", type=float, default=0.30)
     p.add_argument("--cfg-scale-train", type=float, default=4.0)
     p.add_argument("--temperature",     type=float, default=1.0)
@@ -150,6 +152,7 @@ def run_diagnostics_for_item(
     from autoregressive.models.generate import generate
     from CARGO.masks import (
         compute_cargo_mask_with_stats,
+        compute_cargo_mask_pixel_with_stats,
         make_diversity_mask,
         make_early_token_mask,
         make_random_mask,
@@ -159,6 +162,8 @@ def run_diagnostics_for_item(
     from CARGO.rewards import META_KEYS
     import torchvision.transforms.functional as TF
     from PIL import Image
+
+    use_pixel = (args.cargo_mask_source == "pixel")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     G      = args.num_generations
@@ -241,15 +246,20 @@ def run_diagnostics_for_item(
         R_c  = torch.tensor(comp_matrices[key], dtype=torch.float32, device=device)
         safe = key.replace("/", "_")
 
-        # CARGO mask + stats
-        mask, raw_I, stats = compute_cargo_mask_with_stats(
-            stacked_tokens, R_c, latent_size=ls, mask_floor=args.cargo_mask_floor
-        )
+        # CARGO mask + stats — dispatch on mask source
+        if use_pixel:
+            mask, raw_I, stats = compute_cargo_mask_pixel_with_stats(
+                all_pils, R_c, latent_size=ls, mask_floor=args.cargo_mask_floor
+            )
+        else:
+            mask, raw_I, stats = compute_cargo_mask_with_stats(
+                stacked_tokens, R_c, latent_size=ls, mask_floor=args.cargo_mask_floor
+            )
         all_stats[key] = stats
 
         # ── Overlay with stats annotation ─────────────────────────────────────
         overlay = overlay_mask_on_image(best_pil, mask, latent_size=ls,
-                                         stats=stats, title=f"CARGO: {key}")
+                                         stats=stats, title=f"CARGO ({args.cargo_mask_source}): {key}")
         overlay.save(str(out_dir / f"cargo_{safe}_mask.png"))
 
         # ── Raw heatmap (no image, shows true structure) ──────────────────────
@@ -324,7 +334,7 @@ def run_diagnostics_for_item(
     spread = max(scores) - min(scores)
     stat_lines = [
         f"  [{item.id}] best={max(scores):.3f}  worst={min(scores):.3f}  "
-        f"spread={spread:.3f}"
+        f"spread={spread:.3f}  mask_source={args.cargo_mask_source}"
     ]
     for k, s in all_stats.items():
         # Interpret signal quality:

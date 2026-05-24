@@ -32,7 +32,7 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from GRPO.trainer  import GRPOTrainer
-from CARGO.masks   import compute_cargo_mask
+from CARGO.masks   import compute_cargo_mask, compute_cargo_mask_pixel
 from CARGO.rewards import META_KEYS
 
 _COMP_VAR_GATE = 0.05   # per-component group std below this → skip (variance gate)
@@ -55,10 +55,11 @@ class CARGOTrainer(GRPOTrainer):
         scale_rewards:   bool  = True,
         max_grad_norm:   float = 1.0,
         logprob_mode:    str   = "cfg",
-        cargo_lambda_base: float = 0.25,     # weight of scalar GRPO base term
-        cargo_mask_floor:  float = 0.30,     # minimum token importance (soft floor)
-        elite_sft_alpha:   float = 0.0,      # coefficient for elite SFT auxiliary loss (0 = off)
-        elite_sft_frac:    float = 0.25,     # fraction of top samples per group used for SFT
+        cargo_lambda_base:  float = 0.25,    # weight of scalar GRPO base term
+        cargo_mask_floor:   float = 0.30,    # minimum token importance (soft floor)
+        cargo_mask_source:  str   = "pixel", # "pixel" (default) or "vq" (ablation)
+        elite_sft_alpha:    float = 0.0,     # coefficient for elite SFT auxiliary loss (0 = off)
+        elite_sft_frac:     float = 0.25,    # fraction of top samples per group used for SFT
     ):
         super().__init__(
             wrapper=wrapper,
@@ -72,12 +73,41 @@ class CARGOTrainer(GRPOTrainer):
         )
         self.cargo_lambda_base = cargo_lambda_base
         self.cargo_mask_floor  = cargo_mask_floor
+        self.cargo_mask_source = cargo_mask_source
         self.elite_sft_alpha   = elite_sft_alpha
         self.elite_sft_frac    = elite_sft_frac
 
     @property
     def latent_size(self) -> int:
         return self.wrapper.latent_size
+
+    # ------------------------------------------------------------------
+    # Image decoding for pixel masks
+    # ------------------------------------------------------------------
+
+    def _decode_rollout_images(
+        self,
+        stacked_tokens: torch.Tensor,   # (B*G, seq_len)
+        B: int,
+        G: int,
+    ) -> list:
+        """
+        Decode stacked_tokens back to (B*G,) PIL images, ordered [b*G+g].
+        Called only when cargo_mask_source="pixel". VQ decode is fast (~ms each).
+        """
+        import torchvision.transforms.functional as TF
+        wrapper   = self.wrapper
+        ls        = wrapper.latent_size
+        qzshape   = [1, wrapper.codebook_embed_dim, ls, ls]
+        pil_images = []
+        with torch.no_grad():
+            for idx in range(B * G):
+                decoded = wrapper.vq_model.decode_code(
+                    stacked_tokens[idx : idx + 1], qzshape
+                )
+                img_t = (decoded[0].float().clamp(-1, 1) + 1) / 2
+                pil_images.append(TF.to_pil_image(img_t.cpu()))
+        return pil_images
 
     # ------------------------------------------------------------------
     # CARGO advantage computation
@@ -113,67 +143,71 @@ class CARGOTrainer(GRPOTrainer):
         stacked_tokens:   torch.Tensor,   # (B*G, seq_len) int64, on device
         B:                int,
         G:                int,
+        pil_images:       list = None,    # (B*G,) PIL images for pixel mode
     ) -> torch.Tensor:
         """
         Return per-token CARGO advantages of shape (B*G, seq_len).
 
-        stacked_tokens layout: [b*G + g, :] = tokens for batch item b, generation g.
-        comp_rewards layout:   comp_rewards[key][b, g] = score for batch item b, gen g.
+        When cargo_mask_source="pixel" (default), masks are computed from decoded
+        RGB patch L1 distances — semantically consistent across generations.
+        When cargo_mask_source="vq", falls back to VQ token-identity differences
+        (ablation; produces near-uniform masks for LlamaGen due to codebook variance).
+
+        stacked_tokens layout: [b*G + g, :] = batch item b, generation g.
+        pil_images layout:     pil_images[b*G + g] = PIL for batch item b, gen g.
+        comp_rewards layout:   comp_rewards[key][b, g].
         """
         device  = stacked_tokens.device
         seq_len = stacked_tokens.shape[1]
 
         tokens_bg = stacked_tokens.reshape(B, G, seq_len)   # (B, G, seq_len)
+        use_pixel = (self.cargo_mask_source == "pixel") and (pil_images is not None)
 
         cargo_keys = [k for k in comp_rewards if k not in META_KEYS]
         if not cargo_keys:
-            # No usable component scores → fall back to scalar broadcast
             return flat_advantages.unsqueeze(1).expand(-1, seq_len).clone()
 
-        # Accumulate unweighted residuals; normalize by per-batch-item surviving
-        # component count AFTER the variance gate (not by the global cargo_keys count).
         residual_sum    = torch.zeros(B, G, seq_len, dtype=torch.float32)   # cpu
         surviving_count = torch.zeros(B, dtype=torch.float32)               # cpu
 
         for key in cargo_keys:
             R_c = comp_rewards[key]                          # (B, G) cpu
 
-            mean_c = R_c.mean(dim=1, keepdim=True)           # (B, 1)
-            std_c  = R_c.std(dim=1, keepdim=True)            # (B, 1)
-            A_c    = (R_c - mean_c) / (std_c + 1e-4)        # (B, G)
+            mean_c = R_c.mean(dim=1, keepdim=True)
+            std_c  = R_c.std(dim=1, keepdim=True)
+            A_c    = (R_c - mean_c) / (std_c + 1e-4)
             A_c    = A_c.nan_to_num(nan=0.0)
-
-            low_var = (std_c.squeeze(1) < _COMP_VAR_GATE)    # (B,) bool
+            low_var = (std_c.squeeze(1) < _COMP_VAR_GATE)   # (B,) bool
 
             for b in range(B):
                 if low_var[b]:
-                    continue   # variance gate: component signal too weak
+                    continue
 
-                tokens_b = tokens_bg[b]       # (G, seq_len) on device
-                R_c_b    = R_c[b].to(device)  # (G,)
+                R_c_b = R_c[b].to(device)                   # (G,)
 
-                # One winner-aligned mask per (batch_item, component).
-                # mask_b is shared across the G samples — it captures which
-                # tokens distinguish the winner from losers for this component.
-                mask_b = compute_cargo_mask(
-                    tokens_b, R_c_b,
-                    latent_size=self.latent_size,
-                    mask_floor=self.cargo_mask_floor,
-                )  # (seq_len,) on device
+                if use_pixel:
+                    images_b = [pil_images[b * G + g] for g in range(G)]
+                    mask_b = compute_cargo_mask_pixel(
+                        images_b, R_c_b,
+                        latent_size=self.latent_size,
+                        mask_floor=self.cargo_mask_floor,
+                    )
+                else:
+                    mask_b = compute_cargo_mask(
+                        tokens_bg[b], R_c_b,
+                        latent_size=self.latent_size,
+                        mask_floor=self.cargo_mask_floor,
+                    )  # (seq_len,) on device
 
                 A_c_b = A_c[b].to(device)    # (G,)
-                # Accumulate unweighted: (G, 1) × (1, seq_len) → (G, seq_len)
                 residual_sum[b] += (A_c_b.unsqueeze(1) * mask_b.unsqueeze(0)).cpu()
                 surviving_count[b] += 1.0
 
-        # Normalize each batch item by its own surviving component count.
-        # clamp(min=1) avoids div-by-zero for batch items where all components
-        # were variance-gated (residual stays 0 → falls back to scalar).
-        norms    = surviving_count.clamp(min=1.0).reshape(B, 1, 1)  # (B,1,1)
+        norms    = surviving_count.clamp(min=1.0).reshape(B, 1, 1)
         residual = residual_sum / norms
 
-        residual_flat   = residual.reshape(B * G, seq_len).to(device)  # (B*G, seq_len)
-        adv_scalar_flat = flat_advantages.unsqueeze(1)                  # (B*G, 1)
+        residual_flat   = residual.reshape(B * G, seq_len).to(device)
+        adv_scalar_flat = flat_advantages.unsqueeze(1)
 
         cargo_adv = (
             self.cargo_lambda_base * adv_scalar_flat
@@ -313,6 +347,11 @@ class CARGOTrainer(GRPOTrainer):
         B = len(batch)
         G = self.G
 
+        # Decode images for pixel-space masks (fast; reuses already-generated tokens)
+        pil_images = None
+        if self.cargo_mask_source == "pixel":
+            pil_images = self._decode_rollout_images(rollout["stacked_tokens"], B, G)
+
         # Compute per-token CARGO advantages and inject into rollout dict
         comp_rewards = self._extract_component_rewards(rollout["sample_details"], B, G)
         cargo_token_advantages = self._compute_cargo_advantages(
@@ -320,6 +359,7 @@ class CARGOTrainer(GRPOTrainer):
             comp_rewards,
             rollout["stacked_tokens"],
             B, G,
+            pil_images=pil_images,
         )
         rollout["cargo_token_advantages"] = cargo_token_advantages
 

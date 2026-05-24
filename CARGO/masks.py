@@ -1,13 +1,22 @@
 """
 CARGO mask utilities: Component-Aware Reward-Grounded token importance maps.
 
-compute_cargo_mask()            — winner-aligned importance, 16×16 smoothing, soft floor
-compute_cargo_mask_with_stats() — same + returns raw I and diagnostic stats dict
-make_diversity_mask()           — pure token diversity (no reward weighting) baseline
-make_random_mask()              — random baseline (same floor/scale)
-make_early_token_mask()         — early-token sharpening baseline
-overlay_mask_on_image()         — heatmap blend with optional stats annotation
-make_raw_heatmap()              — colormap-only image (no image overlay)
+Pixel-space masks (default, --cargo-mask-source pixel):
+  compute_cargo_mask_pixel()            — winner-aligned L1 patch distances
+  compute_cargo_mask_pixel_with_stats() — same + raw I map and diagnostic stats
+
+VQ-token masks (ablation, --cargo-mask-source vq):
+  compute_cargo_mask()            — winner-aligned token-identity differences
+  compute_cargo_mask_with_stats() — same + raw I and stats
+
+Baselines:
+  make_diversity_mask()    — pure token diversity (no reward weighting)
+  make_random_mask()       — random baseline
+  make_early_token_mask()  — early-token sharpening baseline
+
+Visualization:
+  overlay_mask_on_image()  — heatmap blend with optional stats annotation
+  make_raw_heatmap()       — colormap-only image (no image overlay)
 """
 import math
 
@@ -16,7 +25,170 @@ import torch.nn.functional as F
 
 
 # ---------------------------------------------------------------------------
-# Core mask computation
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def _mask_stats(raw_I: torch.Tensor, mask: torch.Tensor,
+                reward_spread: float, n_valid: int, seq_len: int) -> dict:
+    """Compute diagnostic stats on raw_I (pre-normalization). Mask stats are
+    intentionally excluded — they're always near-uniform after normalization."""
+    ri_mean = float(raw_I.mean().item())
+    ri_std  = float(raw_I.std().item())
+    ri_max  = float(raw_I.max().item())
+    ri_cv   = ri_std / (ri_mean + 1e-8)
+
+    ri_sorted = raw_I.sort().values.cpu()
+    n_f = float(seq_len)
+    cumsum = ri_sorted.cumsum(0)
+    ri_gini = float(
+        1.0 - 2.0 * cumsum.sum().item() / (n_f * ri_sorted.sum().item() + 1e-9) + 1.0 / n_f
+    )
+    top_k = max(1, seq_len // 10)
+    ri_top10_frac = float(
+        ri_sorted[-top_k:].sum().item() / (ri_sorted.sum().item() + 1e-9)
+    )
+    return {
+        "raw_I_max":        ri_max,
+        "raw_I_mean":       ri_mean,
+        "raw_I_cv":         ri_cv,
+        "raw_I_gini":       ri_gini,
+        "raw_I_top10_frac": ri_top10_frac,
+        "reward_spread":    reward_spread,
+        "n_valid_losers":   n_valid,
+    }
+
+
+def _pil_to_patch_grid(
+    pil_img,
+    latent_size: int = 16,
+    device: torch.device = None,
+) -> torch.Tensor:
+    """
+    Convert a PIL image → (3, latent_size, latent_size) float32 in [0, 1]
+    by average-pooling the 256×256 RGB image into a latent_size×latent_size grid.
+    Each cell is the mean RGB of one 16×16 pixel patch.
+    """
+    import torchvision.transforms.functional as TF
+    img_t = TF.to_tensor(pil_img.convert("RGB"))   # (3, H, W) [0,1]
+    if img_t.shape[-2] != 256 or img_t.shape[-1] != 256:
+        img_t = TF.resize(img_t, [256, 256], antialias=True)
+    patch_size = 256 // latent_size                # 16 for latent_size=16
+    grid = F.avg_pool2d(
+        img_t.unsqueeze(0), kernel_size=patch_size, stride=patch_size
+    ).squeeze(0)                                   # (3, latent_size, latent_size)
+    return grid.to(device) if device is not None else grid
+
+
+def _apply_smooth_normalize_floor(
+    I_2d: torch.Tensor,   # (latent_size, latent_size)
+    latent_size: int,
+    mask_floor: float,
+) -> torch.Tensor:
+    """3×3 smooth → normalize [0,1] → soft floor. Returns (seq_len,) mask."""
+    seq_len  = latent_size * latent_size
+    I_sm     = F.avg_pool2d(
+        I_2d.unsqueeze(0).unsqueeze(0), kernel_size=3, stride=1, padding=1
+    ).squeeze()                                    # (latent_size, latent_size)
+    I_min, I_max = I_sm.min(), I_sm.max()
+    if (I_max - I_min).item() > 1e-6:
+        I_norm = (I_sm - I_min) / (I_max - I_min)
+    else:
+        I_norm = torch.full_like(I_sm, 0.5)
+    return (mask_floor + (1.0 - mask_floor) * I_norm).reshape(seq_len)
+
+
+# ---------------------------------------------------------------------------
+# Pixel-space mask (default)
+# ---------------------------------------------------------------------------
+
+def compute_cargo_mask_pixel(
+    images_b,             # list of G PIL images for one batch item
+    R_c_b: torch.Tensor,  # (G,) float component rewards
+    latent_size: int  = 16,
+    mask_floor:  float = 0.30,
+) -> torch.Tensor:
+    """
+    Winner-aligned CARGO mask from decoded pixel space.
+
+    For each 16×16 patch:
+      I[r,c] = mean_over_valid_losers(
+          L1_RGB(winner_patch[r,c], loser_patch[r,c]) * max(R_winner - R_loser, 0)
+      )
+    Then: 3×3 spatial smooth → normalize [0,1] → soft floor.
+
+    Returns (seq_len,) float32 in [mask_floor, 1.0].
+    Pixel L1 differences are semantically consistent across generations, unlike
+    VQ token identities which can vary arbitrarily even for similar image content.
+    """
+    G      = len(images_b)
+    device = R_c_b.device
+    ls     = latent_size
+
+    winner_idx  = int(R_c_b.argmax().item())
+    winner_grid = _pil_to_patch_grid(images_b[winner_idx], ls, device)  # (3, L, L)
+
+    I       = torch.zeros(ls, ls, device=device, dtype=torch.float32)
+    n_valid = 0
+    for g in range(G):
+        if g == winner_idx:
+            continue
+        margin = max(float(R_c_b[winner_idx].item()) - float(R_c_b[g].item()), 0.0)
+        if margin < 1e-6:
+            continue
+        loser_grid = _pil_to_patch_grid(images_b[g], ls, device)   # (3, L, L)
+        l1 = (winner_grid - loser_grid).abs().mean(dim=0)           # (L, L)
+        I += l1 * margin
+        n_valid += 1
+
+    if n_valid > 0:
+        I = I / n_valid
+
+    return _apply_smooth_normalize_floor(I, ls, mask_floor)
+
+
+def compute_cargo_mask_pixel_with_stats(
+    images_b,
+    R_c_b:       torch.Tensor,
+    latent_size: int   = 16,
+    mask_floor:  float = 0.30,
+) -> tuple:
+    """
+    Same as compute_cargo_mask_pixel but also returns (raw_I_flat, stats_dict).
+    raw_I_flat: (seq_len,) float32 — per-patch L1 importance before
+                smoothing/normalization/floor.
+    """
+    G      = len(images_b)
+    device = R_c_b.device
+    ls     = latent_size
+    seq_len = ls * ls
+
+    winner_idx  = int(R_c_b.argmax().item())
+    winner_grid = _pil_to_patch_grid(images_b[winner_idx], ls, device)
+
+    I       = torch.zeros(ls, ls, device=device, dtype=torch.float32)
+    n_valid = 0
+    for g in range(G):
+        if g == winner_idx:
+            continue
+        margin = max(float(R_c_b[winner_idx].item()) - float(R_c_b[g].item()), 0.0)
+        if margin < 1e-6:
+            continue
+        loser_grid = _pil_to_patch_grid(images_b[g], ls, device)
+        I += (winner_grid - loser_grid).abs().mean(dim=0) * margin
+        n_valid += 1
+
+    if n_valid > 0:
+        I = I / n_valid
+
+    raw_I_flat = I.reshape(seq_len)
+    mask       = _apply_smooth_normalize_floor(I, ls, mask_floor)
+    reward_spread = float(R_c_b.max().item()) - float(R_c_b.min().item())
+    stats      = _mask_stats(raw_I_flat, mask, reward_spread, n_valid, seq_len)
+    return mask, raw_I_flat, stats
+
+
+# ---------------------------------------------------------------------------
+# VQ-token mask (ablation, --cargo-mask-source vq)
 # ---------------------------------------------------------------------------
 
 def compute_cargo_mask(
@@ -58,19 +230,10 @@ def compute_cargo_mask(
     if n_valid > 0:
         I = I / n_valid
 
-    # Smooth in 16×16 image space (NOT in flat token order — adjacent tokens
-    # are not necessarily horizontally adjacent in the latent grid).
-    I_2d     = I.reshape(1, 1, latent_size, latent_size)
-    I_smooth = F.avg_pool2d(I_2d, kernel_size=3, stride=1, padding=1).reshape(seq_len)
-
-    # Normalize to [0, 1]
-    I_min, I_max = I_smooth.min(), I_smooth.max()
-    if (I_max - I_min).item() > 1e-6:
-        I_norm = (I_smooth - I_min) / (I_max - I_min)
-    else:
-        I_norm = torch.full_like(I_smooth, 0.5)
-
-    return mask_floor + (1.0 - mask_floor) * I_norm
+    # Smooth in 16×16 image space (NOT in flat token order).
+    return _apply_smooth_normalize_floor(
+        I.reshape(latent_size, latent_size), latent_size, mask_floor
+    )
 
 
 def compute_cargo_mask_with_stats(
@@ -81,11 +244,7 @@ def compute_cargo_mask_with_stats(
 ) -> tuple:
     """
     Same as compute_cargo_mask but also returns (raw_I, stats_dict).
-
-    raw_I    : (seq_len,) float32 — importance before smoothing/normalization/floor.
-               All-zero if fallback triggered (reward tie or G=1).
-    stats    : dict with min, max, mean, std, entropy of the FINAL mask,
-               plus reward_spread and n_valid_losers.
+    raw_I: (seq_len,) float32 before smoothing/normalization/floor.
     """
     G, seq_len = tokens_b.shape
     device = tokens_b.device
@@ -108,58 +267,11 @@ def compute_cargo_mask_with_stats(
     if n_valid > 0:
         I = I / n_valid
 
-    I_2d     = I.reshape(1, 1, latent_size, latent_size)
-    I_smooth = F.avg_pool2d(I_2d, kernel_size=3, stride=1, padding=1).reshape(seq_len)
-
-    I_min, I_max = I_smooth.min(), I_smooth.max()
-    if (I_max - I_min).item() > 1e-6:
-        I_norm = (I_smooth - I_min) / (I_max - I_min)
-    else:
-        I_norm = torch.full_like(I_smooth, 0.5)
-
-    mask = mask_floor + (1.0 - mask_floor) * I_norm
-
+    mask          = _apply_smooth_normalize_floor(
+        I.reshape(latent_size, latent_size), latent_size, mask_floor
+    )
     reward_spread = float(R_c_b.max().item()) - float(R_c_b.min().item())
-
-    # --- Stats on raw_I (before smoothing / normalization / floor) ---
-    # These are the informative metrics.  The final mask is always in
-    # [mask_floor, 1.0] so its std/entropy are dominated by normalization
-    # artifacts and say nothing about spatial structure.
-    ri_mean = float(raw_I.mean().item())
-    ri_std  = float(raw_I.std().item())
-    ri_max  = float(raw_I.max().item())
-    ri_cv   = ri_std / (ri_mean + 1e-8)     # coeff of variation; high = concentrated
-
-    # Gini coefficient of raw_I — 0 = perfectly uniform, 1 = all mass in one token
-    ri_sorted = raw_I.sort().values.cpu()
-    n_f   = float(seq_len)
-    cumsum = ri_sorted.cumsum(0)
-    ri_gini = float(
-        1.0 - 2.0 * cumsum.sum().item() / (n_f * ri_sorted.sum().item() + 1e-9) + 1.0 / n_f
-    )
-
-    # Fraction of total raw_I in the top-10% of tokens (top 26 of 256)
-    top_k  = max(1, seq_len // 10)
-    ri_top10_frac = float(
-        ri_sorted[-top_k:].sum().item() / (ri_sorted.sum().item() + 1e-9)
-    )
-
-    # --- Stats on raw_I_smooth (after spatial smoothing, before floor/norm) ---
-    I_2d_s   = raw_I.reshape(1, 1, latent_size, latent_size)
-    I_sm     = F.avg_pool2d(I_2d_s, 3, 1, 1).reshape(seq_len).cpu()
-    sm_cv    = float(I_sm.std().item()) / (float(I_sm.mean().item()) + 1e-8)
-
-    stats = {
-        # Raw importance before any processing — primary signal quality metrics
-        "raw_I_max":       ri_max,
-        "raw_I_mean":      ri_mean,
-        "raw_I_cv":        ri_cv,       # high (>1) = spatially concentrated
-        "raw_I_gini":      ri_gini,     # high (→1) = concentrated, low (→0) = diffuse
-        "raw_I_top10_frac": ri_top10_frac,  # >0.3 means top-10% tokens hold most signal
-        "smooth_cv":       sm_cv,       # CV after spatial smoothing
-        "reward_spread":   reward_spread,
-        "n_valid_losers":  n_valid,
-    }
+    stats         = _mask_stats(raw_I, mask, reward_spread, n_valid, seq_len)
     return mask, raw_I, stats
 
 
