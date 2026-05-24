@@ -303,7 +303,13 @@ def main():
     # layers consistently produces NaN gradients at C_out, making adapter untrainable.
     # float32 forward+backward is numerically stable and still fits in 44GB.
     gpt.float()
-    print("[train] GPT converted to float32 for stable gradients")
+    # Disable dropout: dropout backward does 0*grad at masked positions.
+    # When the gradient flowing back through 24 layers contains inf values,
+    # 0 * inf = NaN kills the backward pass. With p=0, backward is identity.
+    for m in gpt.modules():
+        if isinstance(m, torch.nn.Dropout):
+            m.p = 0.0
+    print("[train] GPT converted to float32, dropout disabled for stable gradients")
 
     # ── Optimizer ─────────────────────────────────────────────────────────────
     param_groups = [{"params": list(adapter.parameters()), "lr": args.lr}]
@@ -496,11 +502,7 @@ def main():
                 continue
 
             optimizer.zero_grad()
-            if step <= 3:
-                torch.autograd.set_detect_anomaly(True)
             loss.backward()
-            if step <= 3:
-                torch.autograd.set_detect_anomaly(False)
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 [p for pg in optimizer.param_groups for p in pg["params"]],
                 args.grad_clip,
