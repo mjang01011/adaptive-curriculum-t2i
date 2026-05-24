@@ -97,13 +97,15 @@ class CompDataset(Dataset):
         row      = self.rows[idx]
         caption  = row.get("raw_caption" if self.use_raw_caption else "canonical_caption") or ""
         caption  = caption or row.get("raw_caption", row.get("canonical_caption", ""))
-        negatives = row.get("negative_captions", [])
+        negatives      = row.get("negative_captions", [])
+        negative_types = row.get("negative_types", [])
         return {
-            "key":         row.get("key", str(idx)),
-            "caption":     caption,
-            "negatives":   negatives,
-            "tokens_path": row.get("tokens_path"),
-            "image_path":  row.get("image_path"),
+            "key":           row.get("key", str(idx)),
+            "caption":       caption,
+            "negatives":     negatives,
+            "negative_types": negative_types,
+            "tokens_path":   row.get("tokens_path"),
+            "image_path":    row.get("image_path"),
         }
 
 
@@ -158,6 +160,31 @@ def t5_encode(texts: List[str], t5_model, device: str, cls_token_num: int = 120)
 
 
 # T5 cache removed — compute on the fly per batch to avoid ~10GB CPU RAM overhead.
+
+
+# ---------------------------------------------------------------------------
+# Negative selection
+# ---------------------------------------------------------------------------
+
+# Prefer the most visually discriminative negative type.
+# The contrastive loss is strongest when the negative changes something
+# concretely grounded (color, spatial relation) rather than global style.
+_NEG_TYPE_PRIORITY = [
+    "color_swap", "color_change", "relation_reversal",
+    "material_change", "pattern_change", "size_change",
+    "style_global", "other",
+]
+_NEG_TYPE_RANK = {t: i for i, t in enumerate(_NEG_TYPE_PRIORITY)}
+
+
+def _best_negative(negs: list, types: list) -> Optional[str]:
+    """Return the negative caption with the best (lowest rank) type."""
+    if not negs:
+        return None
+    if not types or len(types) != len(negs):
+        return negs[0]
+    best_idx = min(range(len(negs)), key=lambda i: _NEG_TYPE_RANK.get(types[i], 99))
+    return negs[best_idx]
 
 
 # ---------------------------------------------------------------------------
@@ -397,9 +424,9 @@ def main():
                     continue
                 token_list.append(toks)
                 captions.append(row["caption"])
-                negs = row.get("negatives", [])
-                # negs[0] is the highest-priority negative (spatial > attr-swap > attr-drop)
-                neg_captions.append(negs[0] if negs else None)
+                negs  = row.get("negatives", [])
+                types = row.get("negative_types", [])
+                neg_captions.append(_best_negative(negs, types))
 
             if not token_list:
                 continue

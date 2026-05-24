@@ -24,13 +24,13 @@ PROJECT=/viscam/u/jj277/adaptive-curriculum-t2i
 LLAMAGEN=/viscam/u/jj277/adaptive-curriculum-t2i/LlamaGen
 PRETRAINED=/viscam/u/jj277/svl/B3S/baselines/LlamaGen/pretrained_models
 
-EXPERIMENT=${EXPERIMENT:-implicit_adapter_v1}
+EXPERIMENT=${EXPERIMENT:-implicit_adapter_v2}
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 JOB_ID=${SLURM_JOB_ID:-local}
 RUN_NAME="${EXPERIMENT}_${JOB_ID}_${TIMESTAMP}"
 OUTPUT_DIR="/viscam/u/jj277/adaptive-curriculum-t2i/outputs/${RUN_NAME}"
 
-TRAIN_JSONL=${TRAIN_JSONL:-/viscam/u/jj277/adaptive-curriculum-t2i/data/gpic_slots_v1/dataset.jsonl}
+TRAIN_JSONL=${TRAIN_JSONL:-/viscam/u/jj277/adaptive-curriculum-t2i/data/gpic_slots_v2_clean/dataset.jsonl}
 VAL_JSONL=${VAL_JSONL:-/viscam/u/jj277/adaptive-curriculum-t2i/data/attribute_binding/attribute_binding_val_20.jsonl}
 
 echo "[implicit_adapter] EXPERIMENT=${EXPERIMENT}"
@@ -54,7 +54,7 @@ python3 SFT/train_implicit_adapter.py \
     --freeze-llamagen \
     --use-raw-caption \
     --num-epochs   5 \
-    --batch-size   32 \
+    --batch-size   8 \
     --lr           1e-4 \
     --lambda-contrast 0.1 \
     --tau-contrast 0.1 \
