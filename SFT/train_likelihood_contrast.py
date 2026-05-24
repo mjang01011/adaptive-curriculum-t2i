@@ -471,15 +471,16 @@ def main():
     ).to(device=device)  # stays in float32
     adapted_cls = attach_hard_cap_adapter(gpt, adapter, target_ratio=args.target_ratio)
 
-    # Backward hook: GPT's bf16 layers can produce NaN/inf gradients before they
-    # reach the adapter. Clean them at the GPT→cls_embedding boundary so adapter
-    # params always receive finite gradient.
-    def _clean_upstream_grad(module, grad_input, grad_output):
-        return tuple(
-            torch.nan_to_num(g, nan=0.0, posinf=0.0, neginf=0.0) if g is not None else None
-            for g in grad_output
-        )
-    adapted_cls.register_full_backward_hook(_clean_upstream_grad)
+    # Clean NaN/inf gradients from GPT's bf16 backward before they reach adapter params.
+    # register_full_backward_hook fails when no module input requires grad (T5 embeddings
+    # don't). Instead: forward hook captures the output tensor each pass, then registers
+    # a tensor-level backward hook on it — always valid because adapter output requires grad.
+    def _attach_output_grad_cleaner(module, input, output):
+        if output.requires_grad:
+            output.register_hook(
+                lambda g: torch.nan_to_num(g, nan=0.0, posinf=0.0, neginf=0.0)
+            )
+    adapted_cls.register_forward_hook(_attach_output_grad_cleaner)
 
     n_adapter = count_adapter_params(adapter)
     print(f"[train] HardCapAdaptedCaptionEmbedder: {n_adapter:,} params  "
@@ -649,16 +650,32 @@ def main():
 
             optimizer.zero_grad()
             loss.backward()
+
+            # Count NaN grad params before clipping (diagnostic)
+            nan_grad_params  = [(n, p) for n, p in adapter.named_parameters()
+                                if p.grad is not None and not torch.isfinite(p.grad).all()]
+            n_nan_grad       = len(nan_grad_params)
+            raw_grad_norm    = sum(
+                p.grad.norm().item() ** 2 for _, p in adapter.named_parameters()
+                if p.grad is not None and torch.isfinite(p.grad).all()
+            ) ** 0.5
+
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 adapter.parameters(), args.grad_clip,
             ).item()
 
-            if not math.isfinite(grad_norm):
-                nan_params = [n for n, p in adapter.named_parameters()
-                              if p.grad is not None and not torch.isfinite(p.grad).all()]
+            if n_nan_grad > 0:
                 print(
-                    f"[train] WARNING: non-finite grad_norm={grad_norm:.4f} at step {step}"
-                    f" | NaN grad params: {nan_params[:5]}",
+                    f"[train] WARNING: {n_nan_grad} NaN-grad params at step {step}"
+                    f" raw_norm={raw_grad_norm:.4f}"
+                    f" | params: {[n for n, _ in nan_grad_params[:5]]}",
+                    flush=True,
+                )
+
+            if not math.isfinite(grad_norm):
+                print(
+                    f"[train] WARNING: non-finite grad_norm={grad_norm} after clip at step {step},"
+                    f" zeroing grads",
                     flush=True,
                 )
                 optimizer.zero_grad()
@@ -684,8 +701,9 @@ def main():
                 raise SystemExit(0)
 
             # ── Log ──────────────────────────────────────────────────────────
-            gamma      = abs(info.get("gamma",      0.0))
-            delta_norm = info.get("delta_norm",     0.0)
+            gamma          = abs(info.get("gamma", 0.0))
+            delta_norm     = info.get("delta_norm", 0.0)
+            logp_margin    = float(logp_pos.detach()) - float(logp_neg)  # positive = adapter helps
             log = {
                 "step":                       step,
                 "epoch":                      epoch,
@@ -693,10 +711,13 @@ def main():
                 "train/ce":                   round(float(-logp_pos.detach()), 5),
                 "train/logp_pos":             round(float(logp_pos.detach()),  5),
                 "train/logp_neg":             round(float(logp_neg),           5),
+                "train/logp_margin":          round(logp_margin,               5),
                 "train/contrast":             round(float(contrast_loss),      5),
                 "train/gamma":                round(gamma,                     5),
                 "train/delta_norm":           round(float(delta_norm),         4),
-                "train/grad_norm":            round(grad_norm,                 4),
+                "train/grad_norm":            round(grad_norm if math.isfinite(grad_norm) else -1, 4),
+                "train/raw_grad_norm":        round(raw_grad_norm,             4),
+                "train/n_nan_grad_params":    n_nan_grad,
                 "train/pre_cap_ratio":        round(float(pre_cap_ratio),      5),
                 "train/hard_cap_scale":       round(float(info.get("hard_cap_scale",  1.0)), 4),
                 "train/post_cap_ratio":       round(float(info.get("post_cap_ratio",  0.0)), 5),
@@ -710,14 +731,19 @@ def main():
             if step % 20 == 0:
                 elapsed = time.time() - t0
                 print(
-                    f"[train] step={step}  loss={log['train/loss']:.4f}"
+                    f"[train] step={step}"
+                    f"  loss={log['train/loss']:.4f}"
                     f"  ce={log['train/ce']:.4f}"
                     f"  contrast={log['train/contrast']:.4f}"
                     f"  logp_pos={log['train/logp_pos']:.4f}"
                     f"  logp_neg={log['train/logp_neg']:.4f}"
+                    f"  margin={log['train/logp_margin']:+.4f}"
+                    f"  grad={log['train/grad_norm']:.4f}"
+                    f"  raw_grad={log['train/raw_grad_norm']:.4f}"
+                    f"  nan_grads={log['train/n_nan_grad_params']}"
                     f"  gamma={log['train/gamma']:.5f}"
-                    f"  pre_cap_ratio={log['train/pre_cap_ratio']:.5f}"
-                    f"  hard_cap_scale={log['train/hard_cap_scale']:.3f}"
+                    f"  pre_cap={log['train/pre_cap_ratio']:.5f}"
+                    f"  cap_scale={log['train/hard_cap_scale']:.3f}"
                     f"  elapsed={elapsed:.0f}s",
                     flush=True,
                 )
