@@ -201,34 +201,72 @@ def build_canonical_caption(caption: str) -> str:
     return caption
 
 
-def generate_negatives(caption: str, n_negatives: int = 2) -> List[str]:
+_SPATIAL_FLIP = {
+    "to the left of":  "to the right of",
+    "to the right of": "to the left of",
+    "above":           "below",
+    "below":           "above",
+    "on top of":       "under",
+    "under":           "on top of",
+    "in front of":     "behind",
+    "behind":          "in front of",
+}
+_SPATIAL_FLIP_KEYS = sorted(_SPATIAL_FLIP, key=len, reverse=True)
+
+
+def generate_negatives(caption: str, n_negatives: int = 3) -> List[str]:
     """
     Generate corrupted captions for contrastive training.
-    Swaps attributes between entities (attribute-swap negatives).
-    Returns up to n_negatives negatives; may be empty if no clear entities found.
+
+    Priority order (most informative first so negs[0] is the hardest negative):
+      1. Spatial relation reversal  (left↔right, above↔below, in front of↔behind …)
+      2. Attribute swap             (red cube + blue sphere → blue cube + red sphere)
+      3. Attribute drop             (red cube and blue sphere → cube and sphere)
     """
     entities = _extract_entities(caption)
-    if len(entities) < 2:
-        return []
+    low      = caption.lower()
+    candidates: List[str] = []
 
-    negatives = []
+    # ── 1. Spatial relation reversal ────────────────────────────────────────
+    for rel in _SPATIAL_FLIP_KEYS:
+        if rel in low:
+            flipped = low.replace(rel, _SPATIAL_FLIP[rel], 1)
+            # Restore rough capitalisation
+            flipped = flipped[0].upper() + flipped[1:]
+            if not flipped.endswith("."):
+                flipped += "."
+            candidates.append(flipped)
+            break
 
-    # Negative 1: swap all attributes between the first two entities
-    e0, e1 = entities[0], entities[1]
-    if e0["attrs"] and e1["attrs"]:
-        sw0 = " ".join(e1["attrs"]) + " " + e0["noun"]
-        sw1 = " ".join(e0["attrs"]) + " " + e1["noun"]
-        negatives.append(f"A {sw0.strip()} and a {sw1.strip()}.")
+    # ── 2. Attribute swap between first two entities ────────────────────────
+    if len(entities) >= 2:
+        e0, e1 = entities[0], entities[1]
+        if e0["attrs"] and e1["attrs"]:
+            sw0 = (" ".join(e1["attrs"]) + " " + e0["noun"]).strip()
+            sw1 = (" ".join(e0["attrs"]) + " " + e1["noun"]).strip()
+            candidates.append(f"A {sw0} and a {sw1}.")
+        elif e0["attrs"] or e1["attrs"]:
+            # Only one has attrs — swap entity order as fallback
+            p0 = (" ".join(e0["attrs"]) + " " + e0["noun"]).strip()
+            p1 = (" ".join(e1["attrs"]) + " " + e1["noun"]).strip()
+            candidates.append(f"A {p1} and a {p0}.")
 
-    # Negative 2: swap entire entity descriptions
-    if len(negatives) < n_negatives and len(entities) >= 2:
-        p0 = (" ".join(e0["attrs"]) + " " + e0["noun"]).strip()
-        p1 = (" ".join(e1["attrs"]) + " " + e1["noun"]).strip()
-        negatives.append(f"A {p1} and a {p0}.")  # reversed order
+    # ── 3. Attribute drop ────────────────────────────────────────────────────
+    if len(entities) >= 2:
+        e0, e1 = entities[0], entities[1]
+        bare = [e["noun"] for e in entities[:2]]
+        if bare[0] != entities[0]["noun"] or bare[1] != entities[1]["noun"]:
+            candidates.append(f"A {bare[0]} and a {bare[1]}.")
 
-    # Deduplicate vs canonical
+    # Deduplicate and remove anything identical to canonical
     canonical = build_canonical_caption(caption).lower()
-    negatives = [n for n in negatives if n.lower() != canonical]
+    seen: set = set()
+    negatives: List[str] = []
+    for n in candidates:
+        nl = n.lower()
+        if nl != canonical and nl not in seen:
+            seen.add(nl)
+            negatives.append(n)
 
     return negatives[:n_negatives]
 
@@ -487,9 +525,11 @@ def main():
         "reject_reasons":      {},
     }
 
-    kept_rows     = []
     rejected_rows = []
     t0            = time.time()
+
+    out_jsonl = out / "dataset.jsonl"
+    _jsonl_f  = open(out_jsonl, "w")   # opened now, rows written as they are accepted
 
     def _reject(reason, row=None):
         stats["reject_reasons"][reason] = stats["reject_reasons"].get(reason, 0) + 1
@@ -591,7 +631,8 @@ def main():
             if args.save_slot_meta:
                 row["slot_schema"] = _build_slot_schema(caption)
 
-            kept_rows.append(row)
+            _jsonl_f.write(json.dumps(row) + "\n")
+            _jsonl_f.flush()
             stats["num_final_kept"] += 1
 
             if stats["num_final_kept"] % 50 == 0:
@@ -599,11 +640,8 @@ def main():
                 print(f"[mine]  kept={stats['num_final_kept']}  seen={stats['num_records_seen']}"
                       f"  elapsed={elapsed:.0f}s")
 
-    # ── Write outputs ─────────────────────────────────────────────────────────
-    out_jsonl = out / "dataset.jsonl"
-    with open(out_jsonl, "w") as f:
-        for row in kept_rows:
-            f.write(json.dumps(row) + "\n")
+    # ── Finalise outputs ──────────────────────────────────────────────────────
+    _jsonl_f.close()
 
     if args.save_rejected and rejected_rows:
         with open(out / "rejected" / "rejected_examples.jsonl", "w") as f:

@@ -53,15 +53,34 @@ class CompDataset(Dataset):
     Loads GPIC mined JSONL.
     Required fields: canonical_caption, tokens_path or image_path.
     Optional fields: negative_captions (for contrastive loss).
+
+    Supports live reload: call reload() at the start of each epoch to pick up
+    rows appended by a concurrently running miner.
     """
 
     def __init__(self, jsonl_path: str, use_raw_caption: bool = False):
-        self.rows            = []
+        self.jsonl_path      = jsonl_path
         self.use_raw_caption = use_raw_caption
-        with open(jsonl_path) as f:
+        self.rows: list      = []
+        self._load()
+
+    def _load(self):
+        rows = []
+        with open(self.jsonl_path) as f:
             for line in f:
-                if line.strip():
-                    self.rows.append(json.loads(line.strip()))
+                line = line.strip()
+                if line:
+                    try:
+                        rows.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass   # partial line written mid-flush — skip
+        self.rows = rows
+
+    def reload(self) -> int:
+        """Re-read the JSONL. Returns number of new rows added."""
+        prev = len(self.rows)
+        self._load()
+        return len(self.rows) - prev
 
     def __len__(self):
         return len(self.rows)
@@ -191,11 +210,14 @@ def t5_lookup(texts: List[str], cache: dict, t5_model, device: str) -> torch.Ten
 # ---------------------------------------------------------------------------
 
 def sequence_log_prob(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-    """Sum of log-probs over the sequence. Shape: scalar."""
+    """Mean per-token log-prob. Shape: scalar.
+    Mean (not sum) keeps magnitude stable regardless of sequence length,
+    preventing logsigmoid saturation in the contrastive loss.
+    """
     return -F.cross_entropy(
         logits.reshape(-1, logits.shape[-1]),
         targets.reshape(-1),
-        reduction="sum",
+        reduction="mean",
     )
 
 
@@ -231,6 +253,7 @@ def parse_args():
     p.add_argument("--weight-decay",  type=float, default=0.01)
     p.add_argument("--grad-clip",     type=float, default=1.0)
     p.add_argument("--lambda-contrast", type=float, default=0.1, help="0 = disable contrastive loss")
+    p.add_argument("--tau-contrast",  type=float, default=0.1,  help="temperature for contrastive logp margin")
     p.add_argument("--lambda-delta",  type=float, default=1e-5)
     p.add_argument("--eval-every",    type=int,   default=500)
     p.add_argument("--save-every",    type=int,   default=500)
@@ -238,6 +261,8 @@ def parse_args():
     p.add_argument("--precision",     default="bf16")
     p.add_argument("--seed",          type=int,   default=42)
     p.add_argument("--resume",        default=None)
+    p.add_argument("--min-rows",      type=int,   default=200,
+                   help="Wait until dataset has at least this many rows before starting")
     p.add_argument("--wandb",         action="store_true")
     p.add_argument("--wandb-project", default="llamagen-implicit-adapter")
     p.add_argument("--wandb-entity",  default=None)
@@ -348,6 +373,15 @@ def main():
     train_dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
                           collate_fn=lambda x: x, num_workers=args.dl_workers,
                           pin_memory=True, persistent_workers=args.dl_workers > 0)
+    # ── Wait for enough rows (parallel mining support) ────────────────────────
+    if len(train_ds) < args.min_rows:
+        print(f"[train] Waiting for dataset to reach {args.min_rows} rows "
+              f"(currently {len(train_ds)}) ...", flush=True)
+        while len(train_ds) < args.min_rows:
+            time.sleep(15)
+            train_ds.reload()
+        print(f"[train] Dataset ready: {len(train_ds)} rows", flush=True)
+
     print(f"[train] Dataset: {len(train_ds)} examples  "
           f"contrastive_lambda={args.lambda_contrast}")
 
@@ -382,6 +416,16 @@ def main():
     t0   = time.time()
 
     for epoch in range(args.num_epochs):
+        # Reload dataset each epoch to pick up rows added by concurrent miner
+        new_rows = train_ds.reload()
+        if new_rows > 0:
+            print(f"[train] Epoch {epoch}: dataset grew by {new_rows} → {len(train_ds)} total")
+            extra = build_t5_cache(train_ds, t5, device)   # encodes only new texts (cache hits skip)
+            t5_cache.update(extra)
+            train_dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
+                                  collate_fn=lambda x: x, num_workers=args.dl_workers,
+                                  pin_memory=True, persistent_workers=args.dl_workers > 0)
+
         gpt.train()
         adapter.train()
 
@@ -402,6 +446,7 @@ def main():
                 token_list.append(toks)
                 captions.append(row["caption"])
                 negs = row.get("negatives", [])
+                # negs[0] is the highest-priority negative (spatial > attr-swap > attr-drop)
                 neg_captions.append(negs[0] if negs else None)
 
             if not token_list:
@@ -456,8 +501,10 @@ def main():
                         )
                         logp_pos = sequence_log_prob(logits_pos, neg_toks)
 
-                    # -log sigmoid(logp_correct - logp_neg)
-                    contrast_loss = -F.logsigmoid(logp_pos - logp_neg).mean()
+                    # -log sigmoid((logp_correct - logp_neg) / τ)
+                    contrast_loss = -F.logsigmoid(
+                        (logp_pos - logp_neg) / args.tau_contrast
+                    ).mean()
 
             # ── Residual regularisation ──────────────────────────────────────
             info       = adapted_cls.last_adapter_info or {}
