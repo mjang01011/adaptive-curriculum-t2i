@@ -178,10 +178,10 @@ class AdaptedCaptionEmbedder(nn.Module):
 
     # ── Forward ───────────────────────────────────────────────────────────────
 
-    def to(self, *args, **kwargs):
-        # When gpt.to(dtype=bf16) is called (e.g. for val inference), keep adapter
-        # in float32 so its LayerNorm/MHA params don't conflict with C_base.float().
-        result = super().to(*args, **kwargs)
+    def _apply(self, *args, **kwargs):
+        # gpt.to(dtype=bf16) goes through _apply(), not to() — override here so the
+        # adapter always stays float32 regardless of what dtype gpt is moved to.
+        result = super()._apply(*args, **kwargs)
         self.adapter.float()
         return result
 
