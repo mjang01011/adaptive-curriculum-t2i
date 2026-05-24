@@ -471,6 +471,16 @@ def main():
     ).to(device=device)  # stays in float32
     adapted_cls = attach_hard_cap_adapter(gpt, adapter, target_ratio=args.target_ratio)
 
+    # Backward hook: GPT's bf16 layers can produce NaN/inf gradients before they
+    # reach the adapter. Clean them at the GPT→cls_embedding boundary so adapter
+    # params always receive finite gradient.
+    def _clean_upstream_grad(module, grad_input, grad_output):
+        return tuple(
+            torch.nan_to_num(g, nan=0.0, posinf=0.0, neginf=0.0) if g is not None else None
+            for g in grad_output
+        )
+    adapted_cls.register_full_backward_hook(_clean_upstream_grad)
+
     n_adapter = count_adapter_params(adapter)
     print(f"[train] HardCapAdaptedCaptionEmbedder: {n_adapter:,} params  "
           f"target_ratio={args.target_ratio}", flush=True)
