@@ -114,10 +114,9 @@ def _encode_pil_vq(image_path: Optional[str], vq_model, device: str) -> Optional
 # T5 encoding helper
 # ---------------------------------------------------------------------------
 
-def t5_encode(texts: List[str], t5_model, device: str, cls_token_num: int = 120) -> tuple:
+def t5_encode(texts: List[str], t5_model, device: str, cls_token_num: int = 120) -> torch.Tensor:
     """
-    Returns (c_indices, c_emb_masks) matching LlamaGen's left-pad convention.
-    c_indices: [B, cls_token_num, 2048]
+    Returns c_indices [B, cls_token_num, 2048] matching LlamaGen's left-pad convention.
     """
     with torch.no_grad():
         embs, masks = t5_model.get_text_embeddings(texts)
@@ -128,6 +127,63 @@ def t5_encode(texts: List[str], t5_model, device: str, cls_token_num: int = 120)
         new_masks.append(torch.flip(mask, dims=[-1]))
     c_indices = (torch.stack(new_embs) * torch.stack(new_masks)[:, :, None]).to(device)
     return c_indices
+
+
+def build_t5_cache(
+    dataset,
+    t5_model,
+    device: str,
+    encode_batch: int = 16,
+) -> dict:
+    """
+    Pre-encode every unique caption (positive + negatives) in the dataset.
+    Embeddings are stored on CPU; the training loop moves them to GPU per batch.
+    Returns dict[text -> cpu tensor [120, 2048]].
+    """
+    all_texts: set = set()
+    for row in dataset.rows:
+        cap = row.get("canonical_caption") or row.get("raw_caption", "")
+        if cap:
+            all_texts.add(cap)
+        for neg in row.get("negative_captions", []):
+            if neg:
+                all_texts.add(neg)
+
+    all_texts = list(all_texts)
+    cache: dict = {}
+    print(f"[train] Building T5 cache for {len(all_texts)} unique texts ...", flush=True)
+    for i in range(0, len(all_texts), encode_batch):
+        batch = all_texts[i : i + encode_batch]
+        embs = t5_encode(batch, t5_model, device)           # [B, 120, 2048] on GPU
+        for text, emb in zip(batch, embs):
+            cache[text] = emb.cpu()                         # keep on CPU
+        if i % (encode_batch * 20) == 0:
+            print(f"  [{i}/{len(all_texts)}]", flush=True)
+
+    print(f"[train] T5 cache ready: {len(cache)} entries", flush=True)
+    return cache
+
+
+def t5_lookup(texts: List[str], cache: dict, t5_model, device: str) -> torch.Tensor:
+    """Look up cached T5 embeddings; fall back to live encode for any cache miss."""
+    hits, misses_idx, misses_text = [], [], []
+    for i, text in enumerate(texts):
+        if text in cache:
+            hits.append((i, cache[text]))
+        else:
+            misses_idx.append(i)
+            misses_text.append(text)
+
+    result = [None] * len(texts)
+    for i, emb in hits:
+        result[i] = emb.to(device)
+    if misses_text:
+        live = t5_encode(misses_text, t5_model, device)
+        for i, emb in zip(misses_idx, live):
+            result[i] = emb
+            cache[misses_text[misses_idx.index(i)]] = emb.cpu()
+
+    return torch.stack(result)
 
 
 # ---------------------------------------------------------------------------
@@ -176,11 +232,16 @@ def parse_args():
     p.add_argument("--grad-clip",     type=float, default=1.0)
     p.add_argument("--lambda-contrast", type=float, default=0.1, help="0 = disable contrastive loss")
     p.add_argument("--lambda-delta",  type=float, default=1e-5)
-    p.add_argument("--eval-every",    type=int,   default=200)
+    p.add_argument("--eval-every",    type=int,   default=500)
     p.add_argument("--save-every",    type=int,   default=500)
+    p.add_argument("--dl-workers",    type=int,   default=2)
     p.add_argument("--precision",     default="bf16")
     p.add_argument("--seed",          type=int,   default=42)
     p.add_argument("--resume",        default=None)
+    p.add_argument("--wandb",         action="store_true")
+    p.add_argument("--wandb-project", default="llamagen-implicit-adapter")
+    p.add_argument("--wandb-entity",  default=None)
+    p.add_argument("--run-name",      default=None)
     return p.parse_args()
 
 
@@ -199,6 +260,25 @@ def main():
     out_dir  = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     log_path = out_dir / "train_log.jsonl"
+
+    run_name = args.run_name or Path(args.output_dir).name
+    wandb_run = None
+    if args.wandb:
+        try:
+            import wandb
+            wandb_run = wandb.init(
+                project=args.wandb_project,
+                entity=args.wandb_entity or None,
+                name=run_name,
+                config=vars(args),
+            )
+            print(f"[train] W&B: {wandb_run.url}")
+        except Exception as e:
+            print(f"[train] W&B init failed (continuing without): {e}")
+
+    def _wb_log(d, step):
+        if wandb_run:
+            wandb_run.log(d, step=step)
 
     if args.repo_root not in sys.path:
         sys.path.insert(0, args.repo_root)
@@ -266,9 +346,13 @@ def main():
     # ── Dataset ───────────────────────────────────────────────────────────────
     train_ds = CompDataset(args.train_jsonl, use_raw_caption=args.use_raw_caption)
     train_dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
-                          collate_fn=lambda x: x, num_workers=0)
+                          collate_fn=lambda x: x, num_workers=args.dl_workers,
+                          pin_memory=True, persistent_workers=args.dl_workers > 0)
     print(f"[train] Dataset: {len(train_ds)} examples  "
           f"contrastive_lambda={args.lambda_contrast}")
+
+    # ── T5 cache (encode all captions once, reuse every step) ─────────────────
+    t5_cache = build_t5_cache(train_ds, t5, device)
 
     use_amp   = args.precision in ("bf16", "fp16")
     amp_dtype = wrapper.dtype if use_amp else None
@@ -326,8 +410,8 @@ def main():
             tokens = torch.stack(token_list, dim=0)   # [B, 256]
             B_eff  = tokens.shape[0]
 
-            # ── T5 conditioning ──────────────────────────────────────────────
-            c_indices = t5_encode(captions, t5, device)
+            # ── T5 conditioning (from cache — no T5 forward at train time) ──
+            c_indices = t5_lookup(captions, t5_cache, t5, device)
 
             gpt.cls_embedding.uncond_prob = 0.0
 
@@ -350,7 +434,7 @@ def main():
                 if neg_indices:
                     neg_texts    = [neg_captions[i] for i in neg_indices]
                     neg_toks     = tokens[neg_indices]
-                    c_neg        = t5_encode(neg_texts, t5, device)
+                    c_neg        = t5_lookup(neg_texts, t5_cache, t5, device)
 
                     # logp under negative caption — no gradient (used as baseline)
                     gpt.eval()
@@ -407,6 +491,7 @@ def main():
             }
             with open(log_path, "a") as lf:
                 lf.write(json.dumps(log) + "\n")
+            _wb_log({k: v for k, v in log.items() if k != "step"}, step)
 
             if step % 20 == 0:
                 elapsed = time.time() - t0
@@ -426,6 +511,7 @@ def main():
                 log_v = {"step": step, "val/hard_reward": round(val_r, 4)}
                 with open(log_path, "a") as lf:
                     lf.write(json.dumps(log_v) + "\n")
+                _wb_log({"val/hard_reward": val_r}, step)
                 print(f"[train] val hard_reward={val_r:.4f}")
                 if val_r > best_val_reward:
                     best_val_reward = val_r
@@ -436,6 +522,8 @@ def main():
 
     _save_ckpt(out_dir / f"final_step{step}.pt", adapter, optimizer, step)
     print(f"[train] Done. Step {step}. Best val reward: {best_val_reward:.4f}")
+    if wandb_run:
+        wandb_run.finish()
 
 
 def _save_ckpt(path, adapter, optimizer, step):
