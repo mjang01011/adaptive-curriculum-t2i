@@ -194,7 +194,7 @@ class AdaptedCaptionEmbedder(nn.Module):
             # params on the very first optimizer step.
             if C_out.requires_grad:
                 C_out.register_hook(
-                    lambda g: torch.nan_to_num(g.float(), nan=0.0, posinf=1.0, neginf=-1.0)
+                    lambda g: torch.nan_to_num(g, nan=0.0, posinf=1.0, neginf=-1.0)
                 )
             self._last_info = info
             return C_out
