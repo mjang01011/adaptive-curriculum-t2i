@@ -473,6 +473,7 @@ def main():
             # C_base obtained from cap_proj directly — no GPT backward.
             contrast_loss = torch.tensor(0.0, device=device)
             reg_loss      = torch.tensor(0.0, device=device)
+            base_cos_sim  = 0.0
             neg_indices   = [i for i, n in enumerate(neg_captions) if n is not None]
             if neg_indices:
                 neg_texts = [neg_captions[i] for i in neg_indices]
@@ -491,6 +492,14 @@ def main():
                     C_out_neg, _ = adapter(C_base_neg.float())
 
                 B_n = C_out_pos.shape[0]
+
+                # Baseline similarity BEFORE adapter — tells us how easy the task is
+                with torch.no_grad():
+                    base_cos_sim = F.cosine_similarity(
+                        C_base_pos.float().reshape(B_n, -1),
+                        C_base_neg.float().reshape(B_n, -1),
+                        dim=-1,
+                    ).mean().item()
 
                 if args.lambda_contrast > 0:
                     cos_sim = F.cosine_similarity(
@@ -580,6 +589,8 @@ def main():
                 "train/delta_to_base":           round(info.get("delta_to_base",           0.0), 5),
                 "train/effective_delta_to_base": round(info.get("effective_delta_to_base", 0.0), 6),
                 "train/slot_entropy":            round(info.get("slot_attn_entropy",       0.0), 4),
+                "train/base_cos_sim":            round(base_cos_sim if neg_indices else 0.0, 5),
+                "train/contrast_gap":            round((base_cos_sim - float(contrast_loss)) if neg_indices else 0.0, 5),
             }
             with open(log_path, "a") as lf:
                 lf.write(json.dumps(log) + "\n")
@@ -646,39 +657,43 @@ def _viz_generate(wrapper, adapter, adapted_cls, step, out_dir, wandb_run):
     from PIL import Image, ImageDraw, ImageFont
     from autoregressive.models.generate import generate
 
-    gpt = wrapper.gpt
-    t5  = wrapper.t5
-    vq  = wrapper.vq_model
-    device = next(gpt.parameters()).device
+    print(f"[viz] Generating comparison grid at step {step} ...", flush=True)
 
-    caption_embs, emb_masks = t5.model.get_text_embeddings(_VIZ_PROMPTS)
+    gpt    = wrapper.gpt
+    vq     = wrapper.vq_model
+    device = next(gpt.parameters()).device
+    ls     = wrapper.latent_size
+
+    # T5 encode using the same path as _get_conditioning
+    with torch.no_grad():
+        caption_embs, emb_masks = wrapper.t5.get_text_embeddings(_VIZ_PROMPTS)
     new_embs = []
     for emb, mask in zip(caption_embs, emb_masks):
         valid = int(mask.sum().item())
         new_embs.append(torch.cat([emb[valid:], emb[:valid]]))
-    c = torch.stack(new_embs) * torch.flip(emb_masks, dims=[-1])[:, :, None]
-    c = c.to(device=device, dtype=wrapper.dtype)
-    m = torch.flip(emb_masks, dims=[-1]).to(device=device, dtype=wrapper.dtype)
+    c_indices   = (torch.stack(new_embs) * torch.flip(emb_masks, dims=[-1])[:, :, None]).to(device=device, dtype=wrapper.dtype)
+    c_emb_masks = torch.flip(emb_masks, dims=[-1]).to(device=device, dtype=wrapper.dtype)
 
-    ls = wrapper.latent_size
-    qzshape = [len(_VIZ_PROMPTS), 8, ls, ls]
+    qzshape = [len(_VIZ_PROMPTS), wrapper.codebook_embed_dim, ls, ls]
 
     def _gen(enabled):
         adapted_cls._enabled = enabled
         torch.manual_seed(42)
-        idx = generate(gpt, c, ls ** 2, m, cfg_scale=7.5, temperature=1.0,
-                       top_k=2000, top_p=1.0, sample_logits=True)
-        imgs = vq.decode_code(idx, qzshape)  # [B, 3, H, W] in [-1, 1]
-        return [TF.to_pil_image(((s.float().clamp(-1, 1) + 1) / 2).cpu())
-                for s in imgs]
+        idx  = generate(gpt, c_indices, ls ** 2, c_emb_masks,
+                        cfg_scale=7.5, temperature=1.0,
+                        top_k=2000, top_p=1.0, sample_logits=True)
+        imgs = vq.decode_code(idx, qzshape)
+        wrapper._disable_kv_cache()
+        return [TF.to_pil_image(((s.float().clamp(-1, 1) + 1) / 2).cpu()) for s in imgs]
 
     imgs_off = _gen(enabled=False)
     imgs_on  = _gen(enabled=True)
     adapted_cls._enabled = True
 
-    # Build side-by-side rows: [off | on] per prompt
-    W, H = imgs_off[0].size
-    pad, lh = 4, 18
+    # Side-by-side grid: rows = prompts, left = baseline, right = adapter
+    W, H   = imgs_off[0].size
+    pad    = 4
+    lh     = 18
     canvas = Image.new("RGB", (2 * W + pad, len(_VIZ_PROMPTS) * (H + lh) + lh), (20, 20, 20))
     draw   = ImageDraw.Draw(canvas)
     try:
@@ -686,27 +701,27 @@ def _viz_generate(wrapper, adapter, adapted_cls, step, out_dir, wandb_run):
     except Exception:
         font = ImageFont.load_default()
 
-    draw.text((4, 2), "No adapter", fill=(200, 200, 200), font=font)
-    draw.text((W + pad + 4, 2), f"Adapter (step {step})", fill=(100, 220, 100), font=font)
+    draw.text((4, 2),           "No adapter",           fill=(200, 200, 200), font=font)
+    draw.text((W + pad + 4, 2), f"Adapter step {step}", fill=(100, 220, 100), font=font)
 
     for i, (off, on, prompt) in enumerate(zip(imgs_off, imgs_on, _VIZ_PROMPTS)):
         y = lh + i * (H + lh)
-        canvas.paste(off, (0, y + lh))
-        canvas.paste(on,  (W + pad, y + lh))
+        canvas.paste(off, (0,        y + lh))
+        canvas.paste(on,  (W + pad,  y + lh))
         draw.text((4, y + 2), prompt[:55], fill=(160, 160, 255), font=font)
 
     out_path = out_dir / f"viz_step{step:05d}.png"
     canvas.save(out_path)
+    print(f"[viz] Saved → {out_path}", flush=True)
 
     if wandb_run:
-        try:
-            import wandb
-            wandb_run.log({"viz/comparison": wandb.Image(str(out_path),
-                           caption=f"step {step} | left=baseline, right=adapter")}, step=step)
-        except Exception as e:
-            print(f"[train] W&B image log failed: {e}")
-
-    print(f"[train] Viz saved → {out_path}")
+        import wandb
+        wandb_run.log(
+            {"viz/comparison": wandb.Image(str(out_path),
+                               caption=f"step {step} | left=baseline  right=adapter")},
+            step=step,
+        )
+        print(f"[viz] Logged to W&B", flush=True)
 
 
 def _save_ckpt(path, adapter, optimizer, step):
