@@ -299,17 +299,10 @@ def main():
     n_adapter = count_adapter_params(adapter)
     print(f"[train] ImplicitCompositionAdapter: {n_adapter:,} trainable params  n_comp_q={args.n_comp_q}")
 
-    # Convert GPT to float32 for training: bf16 backward through 24 transformer
-    # layers consistently produces NaN gradients at C_out, making adapter untrainable.
-    # float32 forward+backward is numerically stable and still fits in 44GB.
-    gpt.float()
-    # Disable dropout: dropout backward does 0*grad at masked positions.
-    # When the gradient flowing back through 24 layers contains inf values,
-    # 0 * inf = NaN kills the backward pass. With p=0, backward is identity.
-    for m in gpt.modules():
-        if isinstance(m, torch.nn.Dropout):
-            m.p = 0.0
-    print("[train] GPT converted to float32, dropout disabled for stable gradients")
+    # GPT stays in its original bf16 dtype — we never backprop through it.
+    # CE loss is monitoring-only; adapter gradient comes from embedding-space
+    # contrastive loss computed directly on cap_proj outputs (no GPT backward).
+    print("[train] GPT frozen in bf16; adapter trains via embedding contrastive only")
 
     # ── Optimizer ─────────────────────────────────────────────────────────────
     param_groups = [{"params": list(adapter.parameters()), "lr": args.lr}]
@@ -349,9 +342,9 @@ def main():
     # T5 stays on GPU — encode on the fly per batch (no large CPU cache needed)
     print("[train] T5 on-the-fly encoding (no cache)", flush=True)
 
-    # No autocast: GPT is float32 for stable gradients
-    use_amp   = False
-    amp_dtype = None
+    # Autocast for CE monitoring pass (GPT stays in its original bf16 dtype)
+    use_amp   = args.precision in ("bf16", "fp16")
+    amp_dtype = wrapper.dtype
 
     # ── Val + reward model ────────────────────────────────────────────────────
     val_items    = None
@@ -420,77 +413,65 @@ def main():
 
             gpt.cls_embedding.uncond_prob = 0.0
 
-            with torch.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
-                logits, _ = gpt(
-                    idx=tokens[:, :-1],
-                    cond_idx=c_indices,
-                    input_pos=None, targets=tokens, mask=None, valid=None,
-                )
-                if torch.isnan(logits).any():
-                    info = adapted_cls.last_adapter_info or {}
-                    print(
-                        f"[train] WARNING: NaN logits at step {step}"
-                        f" | c_max={c_indices.abs().max():.2f}"
-                        f" | gamma={info.get('gamma', float('nan')):.5f}"
-                        f" | delta_norm={info.get('delta_norm', float('nan')):.4f}"
-                        f" | eff_d/b={info.get('effective_delta_to_base', float('nan')):.5f}",
-                        flush=True,
+            # ── CE loss — monitoring only, no gradient flows to adapter ──────
+            with torch.no_grad():
+                with torch.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
+                    logits, _ = gpt(
+                        idx=tokens[:, :-1],
+                        cond_idx=c_indices.to(dtype=wrapper.dtype),
+                        input_pos=None, targets=tokens, mask=None, valid=None,
                     )
+                if torch.isnan(logits).any():
+                    print(f"[train] WARNING: NaN logits at step {step}, skipping batch", flush=True)
                     continue
                 ce_loss = F.cross_entropy(
                     logits.reshape(-1, logits.shape[-1]),
                     tokens.reshape(-1),
                 )
+            info = adapted_cls.last_adapter_info or {}
 
-            # ── Contrastive caption loss ─────────────────────────────────────
+            # ── Embedding contrastive — gradient only through adapter ─────────
+            # Get C_base from cap_proj directly (no adapter forward, no GPT backward).
+            # Then call adapter() with grad — update only adapter weights.
             contrast_loss = torch.tensor(0.0, device=device)
+            neg_indices   = []
             if args.lambda_contrast > 0:
-                # Collect examples that have a negative caption
-                neg_indices  = [i for i, n in enumerate(neg_captions) if n is not None]
-                if neg_indices:
-                    neg_texts    = [neg_captions[i] for i in neg_indices]
-                    neg_toks     = tokens[neg_indices]
-                    c_neg        = t5_encode(neg_texts, t5, device)  # float32
+                neg_indices = [i for i, n in enumerate(neg_captions) if n is not None]
+            if neg_indices:
+                neg_texts = [neg_captions[i] for i in neg_indices]
+                c_neg     = t5_encode(neg_texts, t5, device)   # float32
 
-                    # logp under negative caption — no gradient (used as baseline)
-                    with torch.no_grad():
-                        logits_neg, _ = gpt(
-                            idx=neg_toks[:, :-1],
-                            cond_idx=c_neg,
-                            input_pos=None, targets=neg_toks, mask=None, valid=None,
-                        )
-                    if not torch.isfinite(logits_neg).all():
-                        print(f"[train] WARNING: non-finite logits_neg at step {step}, skipping contrastive", flush=True)
-                    else:
-                        with torch.no_grad():
-                            logp_neg = sequence_log_prob(logits_neg, neg_toks).detach()
+                with torch.no_grad():
+                    C_base_pos = gpt.cls_embedding.orig(
+                        c_indices[neg_indices].to(dtype=wrapper.dtype), train=False,
+                    )
+                    C_base_neg = gpt.cls_embedding.orig(
+                        c_neg.to(dtype=wrapper.dtype), train=False,
+                    )
 
-                        # logp under correct caption — with gradient
-                        logits_pos, _ = gpt(
-                            idx=neg_toks[:, :-1],
-                            cond_idx=c_indices[neg_indices],
-                            input_pos=None, targets=neg_toks, mask=None, valid=None,
-                        )
-                        if not torch.isfinite(logits_pos).all():
-                            print(f"[train] WARNING: non-finite logits_pos at step {step}, skipping contrastive", flush=True)
-                        else:
-                            logp_pos = sequence_log_prob(logits_pos, neg_toks)
-                            if torch.isfinite(logp_neg) and torch.isfinite(logp_pos):
-                                # -log sigmoid((logp_correct - logp_neg) / τ)
-                                contrast_loss = -F.logsigmoid(
-                                    (logp_pos - logp_neg) / args.tau_contrast
-                                ).mean()
+                C_out_pos, info_c = adapter(C_base_pos.float())
+                with torch.no_grad():
+                    C_out_neg, _ = adapter(C_base_neg.float())
 
-            # ── Residual regularisation ──────────────────────────────────────
-            info       = adapted_cls.last_adapter_info or {}
+                B_n = C_out_pos.shape[0]
+                # Minimize cosine similarity → push pos and neg embeddings apart
+                cos_sim = F.cosine_similarity(
+                    C_out_pos.reshape(B_n, -1),
+                    C_out_neg.reshape(B_n, -1),
+                    dim=-1,
+                )
+                contrast_loss = cos_sim.mean()
+                info = info_c if info_c else info
+
+            # ── Residual regularisation ───────────────────────────────────────
             delta_norm = info.get("delta_norm", 0.0)
             gamma      = abs(info.get("gamma",      0.0))
             reg_loss   = args.lambda_delta * (gamma * delta_norm) ** 2
 
-            loss = ce_loss + args.lambda_contrast * contrast_loss + reg_loss
+            loss = args.lambda_contrast * contrast_loss + reg_loss
 
             if not loss.requires_grad:
-                print(f"[train] WARNING: loss has no grad_fn at step {step} (adapter fallback), skipping", flush=True)
+                print(f"[train] WARNING: loss has no grad_fn at step {step} (no negatives in batch?), skipping", flush=True)
                 continue
 
             if not torch.isfinite(loss):
@@ -523,7 +504,8 @@ def main():
             log = {
                 "step":             step,
                 "epoch":            epoch,
-                "train/loss":       round(float(ce_loss),       5),
+                "train/loss":       round(float(loss),          5),
+                "train/ce":         round(float(ce_loss),       5),
                 "train/contrast":   round(float(contrast_loss), 5),
                 "train/reg":        round(float(reg_loss),      6),
                 "train/gamma":      round(gamma,                5),
@@ -541,6 +523,7 @@ def main():
                 elapsed = time.time() - t0
                 print(
                     f"[train] step={step}  loss={log['train/loss']:.4f}"
+                    f"  ce(mon)={log['train/ce']:.4f}"
                     f"  contrast={log['train/contrast']:.4f}"
                     f"  gamma={log['train/gamma']:.5f}"
                     f"  γΔ/base={log['train/effective_delta_to_base']:.5f}"
@@ -552,8 +535,8 @@ def main():
 
             if step % args.eval_every == 0 and val_items and reward_model:
                 val_r = run_val_eval(val_items[:20], wrapper, reward_model, t5, args, device)
-                # Restore gpt to GPU in float32 (training dtype) and T5 to GPU
-                gpt.to(device=device, dtype=torch.float32)
+                # Restore gpt to GPU (bf16 training dtype) and T5 to GPU
+                gpt.to(device=device, dtype=wrapper.dtype)
                 t5.model.to(device)
                 torch.cuda.empty_cache()
 
