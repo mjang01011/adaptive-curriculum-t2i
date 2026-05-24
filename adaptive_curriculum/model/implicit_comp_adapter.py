@@ -188,15 +188,24 @@ class AdaptedCaptionEmbedder(nn.Module):
     def forward(self, caption, train, force_drop_ids=None):
         C_base = self.orig(caption, train, force_drop_ids)   # [B, 120, d_model]
         if self._enabled:
-            # Disable autocast so the adapter truly runs in fp32 even when called
-            # from inside a bf16 autocast context (extract_attn over 120 KV tokens
-            # overflows in bf16 backward and produces NaN grads otherwise).
+            # Source 1: extract_attn runs inside bf16 autocast during gpt.forward().
+            # With 120 KV tokens, QK^T can overflow bf16, producing NaN softmax values
+            # saved in the autograd graph — backward computes NaN * 0 = NaN even with
+            # zero upstream gradient. Fix: disable autocast so the adapter runs in fp32.
             with torch.autocast("cuda", enabled=False):
                 C_out_f32, info = self.adapter(C_base.float())
             if torch.isnan(C_out_f32).any() or torch.isinf(C_out_f32).any():
                 print("[adapter] WARNING: NaN/inf in adapter output, falling back to C_base", flush=True)
                 self._last_info = None
                 return C_base
+            # Source 2: grad_C_out flowing back through 36 frozen bf16 transformer
+            # layers can itself be NaN/inf even when the forward loss is finite.
+            # gamma.grad = sum(delta * grad_C_out) = sum(0_tensor * NaN) = NaN.
+            # Fix: sanitize the incoming gradient before it fans out to adapter params.
+            if C_out_f32.requires_grad:
+                C_out_f32.register_hook(
+                    lambda g: torch.nan_to_num(g, nan=0.0, posinf=1e4, neginf=-1e4)
+                )
             C_out = C_out_f32.to(dtype=C_base.dtype)
             self._last_info = info
             return C_out
