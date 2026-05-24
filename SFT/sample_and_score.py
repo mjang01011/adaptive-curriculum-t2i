@@ -474,29 +474,44 @@ def main():
                 c_idx       = (shifted * mask_s[:, None]).to(device=device, dtype=dtype).unsqueeze(0)
                 c_mask      = mask_s.to(device=device, dtype=dtype).unsqueeze(0)
 
-            qzshape  = [1, cb, ls, ls]
+            G        = args.gen_count
             pil_list = []
             tok_list = []
 
-            for si in range(args.gen_count):
-                torch.manual_seed(args.seed + pi * 1000 + si)
-                try:
-                    with torch.no_grad():
-                        idx     = generate(gpt, c_idx, ls**2, c_mask,
+            torch.manual_seed(args.seed + pi * 1000)
+            try:
+                c_idx_G  = c_idx.repeat(G, 1, 1)
+                c_mask_G = c_mask.repeat(G, 1)
+                with torch.no_grad():
+                    idx_all     = generate(gpt, c_idx_G, ls**2, c_mask_G,
                                            cfg_scale=args.cfg_scale,
                                            temperature=args.temperature,
                                            top_k=args.top_k_gen, top_p=1.0,
                                            sample_logits=True)
-                        decoded = vq.decode_code(idx, qzshape)
-                    img_t = (decoded[0].float().clamp(-1, 1) + 1) / 2
-                    pil   = TF.to_pil_image(img_t.cpu())
-                    toks  = idx.reshape(-1).cpu()
-                    pil_list.append(pil)
-                    tok_list.append(toks)
-                except Exception as e:
-                    print(f"  [warn] gen sample {si} failed: {e}", flush=True)
-                    pil_list.append(None)
-                    tok_list.append(None)
+                    decoded_all = vq.decode_code(idx_all, [G, cb, ls, ls])
+                for si in range(G):
+                    img_t = (decoded_all[si].float().clamp(-1, 1) + 1) / 2
+                    pil_list.append(TF.to_pil_image(img_t.cpu()))
+                    tok_list.append(idx_all[si].reshape(-1).cpu())
+            except Exception as e:
+                print(f"  [warn] batch gen failed ({e}), falling back to sequential", flush=True)
+                for si in range(G):
+                    torch.manual_seed(args.seed + pi * 1000 + si)
+                    try:
+                        with torch.no_grad():
+                            idx     = generate(gpt, c_idx, ls**2, c_mask,
+                                               cfg_scale=args.cfg_scale,
+                                               temperature=args.temperature,
+                                               top_k=args.top_k_gen, top_p=1.0,
+                                               sample_logits=True)
+                            decoded = vq.decode_code(idx, [1, cb, ls, ls])
+                        img_t = (decoded[0].float().clamp(-1, 1) + 1) / 2
+                        pil_list.append(TF.to_pil_image(img_t.cpu()))
+                        tok_list.append(idx.reshape(-1).cpu())
+                    except Exception as e2:
+                        print(f"  [warn] gen sample {si} failed: {e2}", flush=True)
+                        pil_list.append(None)
+                        tok_list.append(None)
 
             # ── Step 2: Score all generated images with Qwen ──────────────
             scorer._load()
