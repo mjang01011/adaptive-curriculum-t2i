@@ -499,8 +499,6 @@ def main():
                     tok_list.append(None)
 
             # ── Step 2: Score all generated images with Qwen ──────────────
-            # Swap to Qwen GPU, GPT to CPU
-            gpt.cpu(); t5.model.cpu(); torch.cuda.empty_cache()
             scorer._load()
 
             statements = build_statements(row)
@@ -568,11 +566,6 @@ def main():
                 )
 
             # ── Step 3: Save images, tokens, records ──────────────────────
-            # Bring GPT back for next iteration
-            gpt.to(device); t5.model.to(device)
-            if hasattr(scorer, "_model") and scorer._model is not None:
-                scorer._model.cpu()
-            torch.cuda.empty_cache()
 
             for si, (pil, toks) in enumerate(zip(pil_list, tok_list)):
                 if pil is None or toks is None:
