@@ -53,10 +53,10 @@ python3 SFT/train_implicit_adapter.py \
     --t5-path      $PRETRAINED/t5-ckpt \
     --freeze-llamagen \
     --use-raw-caption \
-    --num-epochs   20 \
+    --num-epochs   60 \
     --batch-size   8 \
     --lr           1e-5 \
-    --lambda-contrast    0.1 \
+    --lambda-contrast    0.3 \
     --lambda-delta-ratio 10.0 \
     --delta-ratio-target 0.10 \
     --max-gamma          0.01 \
