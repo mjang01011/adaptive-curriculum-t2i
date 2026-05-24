@@ -234,9 +234,12 @@ def parse_args():
     p.add_argument("--lr",            type=float, default=1e-4)
     p.add_argument("--weight-decay",  type=float, default=0.01)
     p.add_argument("--grad-clip",     type=float, default=1.0)
-    p.add_argument("--lambda-contrast", type=float, default=0.1, help="0 = disable contrastive loss")
-    p.add_argument("--tau-contrast",  type=float, default=0.1,  help="temperature for contrastive logp margin")
-    p.add_argument("--lambda-delta",  type=float, default=1e-5)
+    p.add_argument("--lambda-contrast",    type=float, default=0.1,  help="0 = disable contrastive loss")
+    p.add_argument("--tau-contrast",       type=float, default=0.1,  help="temperature for contrastive logp margin")
+    p.add_argument("--lambda-delta",       type=float, default=1e-5, help="legacy L2 reg (use --lambda-delta-ratio instead)")
+    p.add_argument("--lambda-delta-ratio", type=float, default=0.0,  help="hinge penalty coefficient on ratio > target")
+    p.add_argument("--delta-ratio-target", type=float, default=0.10, help="allowed effective_delta_to_base before penalty kicks in")
+    p.add_argument("--max-gamma",          type=float, default=None, help="hard clamp on adapter.gamma after each step")
     p.add_argument("--eval-every",    type=int,   default=500)
     p.add_argument("--save-every",    type=int,   default=500)
     p.add_argument("--dl-workers",    type=int,   default=2)
@@ -400,9 +403,10 @@ def main():
             reward_model = Qwen3VLRewardModel(model_id=qwen_id)
 
     # ── Training ──────────────────────────────────────────────────────────────
-    best_val_reward = -float("inf")
-    step = start_step
-    t0   = time.time()
+    best_val_reward    = -float("inf")
+    step               = start_step
+    t0                 = time.time()
+    _high_ratio_streak = 0   # consecutive steps with ratio > 0.5
 
     for epoch in range(args.num_epochs):
         gpt.train()
@@ -496,12 +500,15 @@ def main():
                     )
                     contrast_loss = cos_sim.mean()
 
-                # Reg: penalize effective_delta_to_base = ||γΔ|| / ||C_base||
-                # Uses real tensors → gradient flows to gamma AND out_proj weights.
-                # (C_out_pos - C_base_pos) = gamma * out_proj(raw_delta)
+                # Reg: hinge penalty on effective_delta_to_base = ||γΔ|| / ||C_base||
+                # Gradient flows to gamma AND out_proj — uses real tensors, not floats.
                 base_norm_scalar = C_base_pos.float().norm().item()
                 effective        = (C_out_pos - C_base_pos.float()).norm() / (base_norm_scalar + 1e-8)
-                reg_loss         = args.lambda_delta * effective ** 2
+                if args.lambda_delta_ratio > 0:
+                    excess   = torch.relu(effective - args.delta_ratio_target)
+                    reg_loss = args.lambda_delta_ratio * excess ** 2
+                else:
+                    reg_loss = args.lambda_delta * effective ** 2
 
                 info = info_c if info_c else info
 
@@ -539,6 +546,25 @@ def main():
                 optimizer.zero_grad()
             else:
                 optimizer.step()
+                # Hard-clamp gamma so it can't grow past max_gamma
+                if args.max_gamma is not None:
+                    with torch.no_grad():
+                        adapter.gamma.clamp_(0.0, args.max_gamma)
+
+            # ── Early stop: ratio explosion ───────────────────────────────────
+            cur_ratio = info.get("effective_delta_to_base", 0.0)
+            if cur_ratio > 0.5:
+                _high_ratio_streak += 1
+            else:
+                _high_ratio_streak = 0
+            if _high_ratio_streak >= 10:
+                print(
+                    f"[train] EARLY STOP: γΔ/base={cur_ratio:.3f} > 0.5 for 10 consecutive steps. "
+                    f"Saving checkpoint and exiting.",
+                    flush=True,
+                )
+                _save_ckpt(out_dir / f"early_stop_step{step}.pt", adapter, optimizer, step)
+                raise SystemExit(0)
 
             # ── Log ──────────────────────────────────────────────────────────
             log = {

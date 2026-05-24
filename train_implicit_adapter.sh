@@ -24,7 +24,7 @@ PROJECT=/viscam/u/jj277/adaptive-curriculum-t2i
 LLAMAGEN=/viscam/u/jj277/adaptive-curriculum-t2i/LlamaGen
 PRETRAINED=/viscam/u/jj277/svl/B3S/baselines/LlamaGen/pretrained_models
 
-EXPERIMENT=${EXPERIMENT:-implicit_adapter_v2}
+EXPERIMENT=${EXPERIMENT:-implicit_adapter_v3}
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 JOB_ID=${SLURM_JOB_ID:-local}
 RUN_NAME="${EXPERIMENT}_${JOB_ID}_${TIMESTAMP}"
@@ -53,15 +53,18 @@ python3 SFT/train_implicit_adapter.py \
     --t5-path      $PRETRAINED/t5-ckpt \
     --freeze-llamagen \
     --use-raw-caption \
-    --num-epochs   5 \
+    --num-epochs   20 \
     --batch-size   8 \
-    --lr           1e-4 \
-    --lambda-contrast 0.1 \
-    --lambda-delta  1e-3 \
+    --lr           1e-5 \
+    --lambda-contrast    0.1 \
+    --lambda-delta-ratio 10.0 \
+    --delta-ratio-target 0.10 \
+    --max-gamma          0.01 \
+    --grad-clip          0.5 \
     --tau-contrast 0.1 \
-    --eval-every   500 \
-    --save-every   500 \
+    --eval-every   200 \
+    --save-every   200 \
     --dl-workers   2 \
-    --min-rows     500 \
+    --min-rows     1 \
     --run-name     $RUN_NAME \
     --wandb
