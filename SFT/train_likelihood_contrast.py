@@ -1,0 +1,757 @@
+"""
+Train ImplicitCompositionAdapter via likelihood-contrastive loss through frozen GPT.
+
+Unlike train_implicit_adapter.py (embedding-space cosine contrastive), this script
+computes a proper likelihood contrast:
+
+  logp_pos = -CE(GPT(tokens | pos_caption), tokens)   # gradient flows to adapter
+  logp_neg = -CE(GPT(tokens | neg_caption), tokens)   # no_grad
+
+  L = lambda_ce * CE_pos
+    + lambda_contrast * -logsigmoid((logp_pos - logp_neg) / tau)
+
+The adapter is wrapped in HardCapAdaptedCaptionEmbedder (v2) which enforces
+a hard ratio cap at every forward pass, so no separate delta-ratio hinge is needed.
+
+GPT params are frozen (requires_grad=False) but the positive pass is NOT wrapped
+in torch.no_grad(), so gradients flow through GPT activations back to the adapter's
+cls_embedding output.
+
+Dataset notes
+-------------
+  --clean-jsonl   high-margin contrastive examples (required); all rows need
+                  negative_captions + vq tokens
+  --broad-jsonl   optional broader dataset for extra CE supervision (rows without
+                  negatives are used for CE only; rows with negatives are ignored
+                  here — overlap with clean is fine)
+
+Usage
+-----
+  python SFT/train_likelihood_contrast.py \\
+    --clean-jsonl  $PROJ/data/gpic_slots_v2_clean/dataset.jsonl \\
+    --output-dir   $PROJ/outputs/lc_adapter_v1 \\
+    --repo-root    $LLAMAGEN \\
+    --gpt-ckpt     $PRETRAINED/t2i_XL_stage1_256.pt \\
+    --vq-ckpt      $PRETRAINED/vq_ds16_t2i.pt \\
+    --t5-path      $PRETRAINED/t5-ckpt \\
+    --num-epochs   60 --batch-size 2 --lr 1e-6
+"""
+import argparse
+import json
+import math
+import os
+import sys
+import time
+from pathlib import Path
+from typing import List, Optional
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+
+
+# ---------------------------------------------------------------------------
+# Dataset — replicates CompDataset from train_implicit_adapter.py
+# ---------------------------------------------------------------------------
+
+class ContrastDataset(Dataset):
+    """
+    Loads the high-margin contrastive JSONL.
+    Requires: negative_captions, tokens_path or image_path.
+    Skips rows without negatives.
+    """
+
+    def __init__(self, jsonl_path: str, use_raw_caption: bool = False):
+        self.jsonl_path      = jsonl_path
+        self.use_raw_caption = use_raw_caption
+        self.rows: list      = []
+        self._load()
+
+    def _load(self):
+        rows, skipped = [], 0
+        with open(self.jsonl_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                    if not row.get("negative_captions"):
+                        skipped += 1
+                        continue
+                    rows.append(row)
+                except json.JSONDecodeError:
+                    pass
+        if skipped:
+            print(f"[dataset] Skipped {skipped} rows without negatives (kept {len(rows)})", flush=True)
+        self.rows = rows
+
+    def reload(self) -> int:
+        prev = len(self.rows)
+        self._load()
+        return len(self.rows) - prev
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, idx):
+        row           = self.rows[idx]
+        caption       = row.get("raw_caption" if self.use_raw_caption else "canonical_caption") or ""
+        caption       = caption or row.get("raw_caption", row.get("canonical_caption", ""))
+        negatives     = row.get("negative_captions", [])
+        neg_types     = row.get("negative_types", [])
+        return {
+            "key":           row.get("key", str(idx)),
+            "caption":       caption,
+            "negatives":     negatives,
+            "negative_types": neg_types,
+            "tokens_path":   row.get("tokens_path"),
+            "image_path":    row.get("image_path"),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Token loading / VQ encode (identical to train_implicit_adapter.py)
+# ---------------------------------------------------------------------------
+
+def _load_vq_tokens(tokens_path: Optional[str], device: str) -> Optional[torch.Tensor]:
+    if tokens_path and Path(tokens_path).exists():
+        return torch.load(tokens_path, map_location="cpu").long().to(device)
+    return None
+
+
+def _encode_pil_vq(image_path: Optional[str], vq_model, device: str) -> Optional[torch.Tensor]:
+    if not image_path or not Path(image_path).exists():
+        return None
+    try:
+        import torchvision.transforms as T
+        import torchvision.transforms.functional as TF
+        from PIL import Image
+        img  = Image.open(image_path).convert("RGB")
+        w, h = img.size
+        scale = 256 / min(w, h)
+        img   = img.resize((int(w * scale + .5), int(h * scale + .5)))
+        img   = T.CenterCrop(256)(img)
+        img_t = (TF.to_tensor(img) * 2 - 1).unsqueeze(0).to(device)
+        with torch.no_grad():
+            _, _, [_, _, indices] = vq_model.encode(img_t)
+        return indices.reshape(-1).long()
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# T5 encoding (same left-pad convention as train_implicit_adapter.py)
+# ---------------------------------------------------------------------------
+
+def t5_encode(texts: List[str], t5_model, device: str) -> torch.Tensor:
+    """Returns c_indices [B, 120, 2048] float32, left-padded."""
+    with torch.no_grad():
+        embs, masks = t5_model.get_text_embeddings(texts)
+    new_embs, new_masks = [], []
+    for emb, mask in zip(embs, masks):
+        valid = int(mask.sum().item())
+        new_embs.append(torch.cat([emb[valid:], emb[:valid]]))
+        new_masks.append(torch.flip(mask, dims=[-1]))
+    c_indices = (torch.stack(new_embs) * torch.stack(new_masks)[:, :, None]).float().to(device)
+    return c_indices
+
+
+# ---------------------------------------------------------------------------
+# Negative selection (same priority as train_implicit_adapter.py)
+# ---------------------------------------------------------------------------
+
+_NEG_TYPE_PRIORITY = [
+    "color_swap", "color_change", "relation_reversal",
+    "material_change", "pattern_change", "size_change",
+    "style_global", "other",
+]
+_NEG_TYPE_RANK = {t: i for i, t in enumerate(_NEG_TYPE_PRIORITY)}
+
+
+def _best_negative(negs: list, types: list) -> Optional[str]:
+    if not negs:
+        return None
+    if not types or len(types) != len(negs):
+        return negs[0]
+    best_idx = min(range(len(negs)), key=lambda i: _NEG_TYPE_RANK.get(types[i], 99))
+    return negs[best_idx]
+
+
+# ---------------------------------------------------------------------------
+# Likelihood helpers
+# ---------------------------------------------------------------------------
+
+def sequence_log_prob(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    """Mean per-token log-prob (scalar). Mean keeps magnitude stable vs sum."""
+    return -F.cross_entropy(
+        logits.reshape(-1, logits.shape[-1]),
+        targets.reshape(-1),
+        reduction="mean",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Args
+# ---------------------------------------------------------------------------
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    # data
+    p.add_argument("--clean-jsonl",  required=True,
+                   help="High-margin contrastive examples (must have negative_captions)")
+    p.add_argument("--val-jsonl",    default=None)
+    p.add_argument("--output-dir",   required=True)
+    # models
+    p.add_argument("--repo-root",    required=True)
+    p.add_argument("--gpt-ckpt",     required=True)
+    p.add_argument("--vq-ckpt",      required=True)
+    p.add_argument("--t5-path",      required=True)
+    p.add_argument("--qwen-model",   default=None)
+    p.add_argument("--reward-mode",  default="grpo_attr_contrastive_rubric_v2")
+    # adapter
+    p.add_argument("--d-model",      type=int,   default=1280)
+    p.add_argument("--n-comp-q",     type=int,   default=8)
+    p.add_argument("--n-heads",      type=int,   default=8)
+    p.add_argument("--target-ratio", type=float, default=0.05,
+                   help="Hard residual cap: ||γΔ|| / ||C_base|| <= target_ratio")
+    # training
+    p.add_argument("--use-raw-caption", action="store_true")
+    p.add_argument("--num-epochs",   type=int,   default=60)
+    p.add_argument("--batch-size",   type=int,   default=2)
+    p.add_argument("--lr",           type=float, default=1e-6)
+    p.add_argument("--weight-decay", type=float, default=0.01)
+    p.add_argument("--grad-clip",    type=float, default=0.5)
+    # loss weights
+    p.add_argument("--lambda-ce",       type=float, default=1.0,
+                   help="Weight for CE loss on positive caption (0 = disable)")
+    p.add_argument("--lambda-contrast", type=float, default=0.05,
+                   help="Weight for likelihood-contrastive term")
+    p.add_argument("--tau-contrast",    type=float, default=0.2,
+                   help="Temperature for logsigmoid contrastive margin")
+    p.add_argument("--max-gamma",       type=float, default=0.01,
+                   help="Hard clamp on adapter.gamma after each step")
+    # checkpointing / eval
+    p.add_argument("--eval-every",   type=int,   default=200)
+    p.add_argument("--save-every",   type=int,   default=200)
+    p.add_argument("--dl-workers",   type=int,   default=2)
+    p.add_argument("--precision",    default="bf16")
+    p.add_argument("--seed",         type=int,   default=42)
+    p.add_argument("--resume",       default=None)
+    p.add_argument("--min-rows",     type=int,   default=1)
+    p.add_argument("--wandb",        action="store_true")
+    p.add_argument("--wandb-project", default="llamagen-lc-adapter")
+    p.add_argument("--wandb-entity", default=None)
+    p.add_argument("--run-name",     default=None)
+    return p.parse_args()
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint
+# ---------------------------------------------------------------------------
+
+def _save_ckpt(path, adapter, optimizer, step):
+    torch.save({
+        "adapter":   adapter.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "step":      step,
+    }, str(path))
+    print(f"[train] Saved {path}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Validation (same two-phase approach as train_implicit_adapter.py)
+# ---------------------------------------------------------------------------
+
+def run_val_eval(val_items, wrapper, reward_model, t5_model, args, device):
+    from autoregressive.models.generate import generate
+    import torchvision.transforms.functional as TF
+
+    gpt = wrapper.gpt
+    ls  = wrapper.latent_size
+
+    if hasattr(reward_model, "_model") and reward_model._model is not None:
+        reward_model._model.cpu()
+        torch.cuda.empty_cache()
+
+    gpt.to(device=device, dtype=wrapper.dtype)
+    t5_model.model.to(device)
+    gpt.eval()
+
+    pils = []
+    for item in val_items:
+        with torch.no_grad():
+            c_indices, c_emb_masks = wrapper._get_conditioning([item])
+        qzshape = [1, wrapper.codebook_embed_dim, ls, ls]
+        with torch.no_grad():
+            idx     = generate(
+                gpt, c_indices, ls ** 2, c_emb_masks,
+                cfg_scale=wrapper.cfg_scale, temperature=wrapper.temperature,
+                top_k=wrapper.top_k, top_p=wrapper.top_p, sample_logits=True,
+            )
+            decoded = wrapper.vq_model.decode_code(idx, qzshape)
+            img_t   = (decoded[0].float().clamp(-1, 1) + 1) / 2
+        pils.append(TF.to_pil_image(img_t.cpu()))
+    wrapper._disable_kv_cache()
+
+    gpt.cpu()
+    t5_model.model.cpu()
+    torch.cuda.empty_cache()
+
+    if hasattr(reward_model, "_model") and reward_model._model is not None:
+        reward_model._model.to(device)
+    elif hasattr(reward_model, "_load"):
+        reward_model._load()
+
+    scores = []
+    for pil, item in zip(pils, val_items):
+        result = reward_model.score_images_batch([(pil, item)], mode=args.reward_mode)
+        scores.append(float(result[0]["score"]))
+
+    if hasattr(reward_model, "_model") and reward_model._model is not None:
+        reward_model._model.cpu()
+    torch.cuda.empty_cache()
+
+    return sum(scores) / len(scores) if scores else 0.0
+
+
+# ---------------------------------------------------------------------------
+# Visualization (mirrors _viz_generate from train_implicit_adapter.py)
+# ---------------------------------------------------------------------------
+
+_VIZ_PROMPTS = [
+    "A red cube on top of a blue sphere.",
+    "A small white cat sitting next to a large black dog.",
+    "A green apple to the left of a red orange on a wooden table.",
+    "A striped shirt hanging above a polka dot skirt.",
+]
+
+
+@torch.no_grad()
+def _viz_generate(wrapper, adapter, adapted_cls, step, out_dir, wandb_run):
+    import torchvision.transforms.functional as TF
+    from PIL import Image, ImageDraw, ImageFont
+    from autoregressive.models.generate import generate
+
+    print(f"[viz] Generating comparison grid at step {step} ...", flush=True)
+
+    gpt    = wrapper.gpt
+    vq     = wrapper.vq_model
+    device = next(gpt.parameters()).device
+    ls     = wrapper.latent_size
+
+    with torch.no_grad():
+        caption_embs, emb_masks = wrapper.t5.get_text_embeddings(_VIZ_PROMPTS)
+    new_embs = []
+    for emb, mask in zip(caption_embs, emb_masks):
+        valid = int(mask.sum().item())
+        new_embs.append(torch.cat([emb[valid:], emb[:valid]]))
+    c_indices   = (torch.stack(new_embs) * torch.flip(emb_masks, dims=[-1])[:, :, None]).to(device=device, dtype=wrapper.dtype)
+    c_emb_masks = torch.flip(emb_masks, dims=[-1]).to(device=device, dtype=wrapper.dtype)
+
+    qzshape = [len(_VIZ_PROMPTS), wrapper.codebook_embed_dim, ls, ls]
+
+    def _gen(enabled):
+        adapted_cls._enabled = enabled
+        torch.manual_seed(42)
+        idx  = generate(gpt, c_indices, ls ** 2, c_emb_masks,
+                        cfg_scale=7.5, temperature=1.0,
+                        top_k=2000, top_p=1.0, sample_logits=True)
+        imgs = vq.decode_code(idx, qzshape)
+        wrapper._disable_kv_cache()
+        return [TF.to_pil_image(((s.float().clamp(-1, 1) + 1) / 2).cpu()) for s in imgs]
+
+    imgs_off = _gen(enabled=False)
+    imgs_on  = _gen(enabled=True)
+    adapted_cls._enabled = True
+
+    W, H   = imgs_off[0].size
+    pad    = 4
+    lh     = 18
+    canvas = Image.new("RGB", (2 * W + pad, len(_VIZ_PROMPTS) * (H + lh) + lh), (20, 20, 20))
+    draw   = ImageDraw.Draw(canvas)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
+    except Exception:
+        font = ImageFont.load_default()
+
+    draw.text((4, 2),           "No adapter",                  fill=(200, 200, 200), font=font)
+    draw.text((W + pad + 4, 2), f"LC-Adapter step {step}",    fill=(100, 220, 100), font=font)
+
+    for i, (off, on, prompt) in enumerate(zip(imgs_off, imgs_on, _VIZ_PROMPTS)):
+        y = lh + i * (H + lh)
+        canvas.paste(off, (0,        y + lh))
+        canvas.paste(on,  (W + pad,  y + lh))
+        draw.text((4, y + 2), prompt[:55], fill=(160, 160, 255), font=font)
+
+    out_path = out_dir / f"viz_step{step:05d}.png"
+    canvas.save(out_path)
+    print(f"[viz] Saved → {out_path}", flush=True)
+
+    if wandb_run:
+        import wandb
+        wandb_run.log(
+            {"viz/comparison": wandb.Image(str(out_path),
+                               caption=f"step {step} | left=baseline  right=lc-adapter")},
+            step=step,
+        )
+        print(f"[viz] Logged to W&B", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    args   = parse_args()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+
+    out_dir  = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log_path = out_dir / "train_log.jsonl"
+
+    run_name  = args.run_name or Path(args.output_dir).name
+    wandb_run = None
+    if args.wandb:
+        try:
+            import wandb
+            wandb_run = wandb.init(
+                project=args.wandb_project,
+                entity=args.wandb_entity or None,
+                name=run_name,
+                config=vars(args),
+            )
+            print(f"[train] W&B: {wandb_run.url}")
+        except Exception as e:
+            print(f"[train] W&B init failed (continuing without): {e}")
+
+    def _wb_log(d, step):
+        if wandb_run:
+            wandb_run.log(d, step=step)
+
+    if args.repo_root not in sys.path:
+        sys.path.insert(0, args.repo_root)
+
+    # ── Load LlamaGen ─────────────────────────────────────────────────────────
+    print("[train] Loading LlamaGen ...", flush=True)
+    from adaptive_curriculum.model.llamagen_wrapper import LlamaGenWrapper
+    wrapper = LlamaGenWrapper(
+        repo_root=args.repo_root,
+        vq_ckpt=args.vq_ckpt,
+        gpt_ckpt=args.gpt_ckpt,
+        t5_path=args.t5_path,
+        precision=args.precision,
+    )
+    gpt = wrapper.gpt
+    t5  = wrapper.t5
+    vq  = wrapper.vq_model
+
+    # Freeze all GPT weights — gradient flows through activations but not params.
+    # This is essential: we want adapter updates, not GPT weight updates.
+    for p in gpt.parameters():
+        p.requires_grad = False
+    for p in t5.model.parameters():
+        p.requires_grad = False
+    print("[train] GPT + T5 frozen (requires_grad=False)", flush=True)
+
+    # ── Attach HardCapAdaptedCaptionEmbedder (v2) ─────────────────────────────
+    from adaptive_curriculum.model.implicit_comp_adapter import (
+        ImplicitCompositionAdapter, count_adapter_params,
+    )
+    from adaptive_curriculum.model.implicit_comp_adapter_v2 import (
+        attach_hard_cap_adapter,
+    )
+    adapter     = ImplicitCompositionAdapter(
+        d_model=args.d_model, n_comp_q=args.n_comp_q, n_heads=args.n_heads,
+    ).to(device=device)  # stays in float32
+    adapted_cls = attach_hard_cap_adapter(gpt, adapter, target_ratio=args.target_ratio)
+
+    n_adapter = count_adapter_params(adapter)
+    print(f"[train] HardCapAdaptedCaptionEmbedder: {n_adapter:,} params  "
+          f"target_ratio={args.target_ratio}", flush=True)
+
+    # ── Optimizer (adapter params only) ──────────────────────────────────────
+    optimizer = torch.optim.AdamW(
+        adapter.parameters(), lr=args.lr, weight_decay=args.weight_decay,
+    )
+
+    # ── Resume ────────────────────────────────────────────────────────────────
+    start_step = 0
+    if args.resume and Path(args.resume).exists():
+        ckpt = torch.load(args.resume, map_location="cpu")
+        adapter.load_state_dict(ckpt["adapter"])
+        optimizer.load_state_dict(ckpt["optimizer"])
+        start_step = ckpt.get("step", 0)
+        print(f"[train] Resumed from {args.resume} at step {start_step}", flush=True)
+
+    # ── Dataset ───────────────────────────────────────────────────────────────
+    clean_ds = ContrastDataset(args.clean_jsonl, use_raw_caption=args.use_raw_caption)
+
+    if len(clean_ds) < args.min_rows:
+        print(f"[train] Waiting for dataset ({len(clean_ds)} rows, need {args.min_rows}) ...", flush=True)
+        while len(clean_ds) < args.min_rows:
+            time.sleep(15)
+            clean_ds.reload()
+
+    clean_dl = DataLoader(
+        clean_ds, batch_size=args.batch_size, shuffle=True,
+        collate_fn=lambda x: x, num_workers=args.dl_workers,
+        pin_memory=True, persistent_workers=args.dl_workers > 0,
+    )
+    print(f"[train] Contrastive dataset: {len(clean_ds)} examples", flush=True)
+
+    # ── Val + reward model ────────────────────────────────────────────────────
+    val_items    = None
+    reward_model = None
+    if args.val_jsonl:
+        from adaptive_curriculum.data.schemas import BucketItem
+        val_items = []
+        with open(args.val_jsonl) as f:
+            for line in f:
+                if line.strip():
+                    val_items.append(BucketItem.from_dict(json.loads(line.strip())))
+        print(f"[train] Val items: {len(val_items)}")
+        qwen_id = args.qwen_model or "Qwen/Qwen3-VL-4B-Instruct"
+        try:
+            from CARGO.scoring import CARGORewardModel
+            reward_model = CARGORewardModel(model_id=qwen_id)
+        except ImportError:
+            from adaptive_curriculum.reward.vlm_reward import Qwen3VLRewardModel
+            reward_model = Qwen3VLRewardModel(model_id=qwen_id)
+
+    # ── AMP config ───────────────────────────────────────────────────────────
+    use_amp   = args.precision in ("bf16", "fp16")
+    amp_dtype = wrapper.dtype  # torch.bfloat16
+
+    # ── Training loop ─────────────────────────────────────────────────────────
+    best_val_reward    = -float("inf")
+    step               = start_step
+    t0                 = time.time()
+    _high_ratio_streak = 0
+
+    for epoch in range(args.num_epochs):
+        gpt.train()
+        adapter.train()
+
+        for batch in clean_dl:
+            step += 1
+
+            # ── Gather valid examples ─────────────────────────────────────────
+            token_list   = []
+            captions     = []
+            neg_captions = []
+
+            for row in batch:
+                toks = _load_vq_tokens(row["tokens_path"], device)
+                if toks is None:
+                    toks = _encode_pil_vq(row["image_path"], vq, device)
+                if toks is None:
+                    continue
+                token_list.append(toks)
+                captions.append(row["caption"])
+                negs  = row.get("negatives", [])
+                types = row.get("negative_types", [])
+                neg_captions.append(_best_negative(negs, types))
+
+            if not token_list:
+                continue
+
+            tokens = torch.stack(token_list, dim=0)   # [B, 256]
+
+            # ── T5 encode positive captions ──────────────────────────────────
+            c_pos = t5_encode(captions, t5, device)   # float32 [B, 120, 2048]
+
+            if torch.isnan(c_pos).any() or torch.isinf(c_pos).any():
+                print(f"[train] WARNING: NaN/inf in c_pos at step {step}, skipping", flush=True)
+                continue
+
+            # ── Positive pass — WITH gradient flowing to adapter ─────────────
+            # GPT.requires_grad=False so no GPT weight updates; adapter updates only.
+            # Autocast stays on so GPT internals stay in bf16.
+            gpt.cls_embedding.uncond_prob = 0.0
+            adapted_cls._enabled = True
+
+            with torch.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
+                logits_pos, _ = gpt(
+                    idx=tokens[:, :-1],
+                    cond_idx=c_pos.to(dtype=amp_dtype),
+                    input_pos=None, targets=tokens, mask=None, valid=None,
+                )
+
+            if torch.isnan(logits_pos).any() or torch.isinf(logits_pos).any():
+                print(f"[train] WARNING: NaN/inf in logits_pos at step {step}, skipping", flush=True)
+                continue
+
+            # logp_pos has gradient via: logits_pos → GPT activations → cls_embedding → adapter
+            logp_pos = sequence_log_prob(logits_pos, tokens)
+
+            info = adapted_cls._last_info or {}
+
+            # ── Negative pass — no gradient (memory efficient) ────────────────
+            logp_neg      = torch.tensor(0.0, device=device)
+            contrast_loss = torch.tensor(0.0, device=device)
+
+            neg_indices = [i for i, n in enumerate(neg_captions) if n is not None]
+            if neg_indices and args.lambda_contrast > 0:
+                neg_texts = [neg_captions[i] for i in neg_indices]
+                c_neg     = t5_encode(neg_texts, t5, device)
+
+                with torch.no_grad():
+                    with torch.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
+                        logits_neg, _ = gpt(
+                            idx=tokens[neg_indices, :-1],
+                            cond_idx=c_neg.to(dtype=amp_dtype),
+                            input_pos=None,
+                            targets=tokens[neg_indices],
+                            mask=None, valid=None,
+                        )
+                    if not (torch.isnan(logits_neg).any() or torch.isinf(logits_neg).any()):
+                        logp_neg = sequence_log_prob(logits_neg, tokens[neg_indices]).detach()
+                    else:
+                        print(f"[train] WARNING: NaN/inf in logits_neg at step {step}, skipping contrast", flush=True)
+                        logp_neg = logp_pos.detach()  # margin = 0, no contrast signal
+
+                # -logsigmoid((logp_pos_mean - logp_neg) / tau)
+                # logp_pos values for only the neg_indices rows
+                logp_pos_sub = sequence_log_prob(logits_pos[neg_indices], tokens[neg_indices])
+                margin       = (logp_pos_sub - logp_neg) / args.tau_contrast
+                contrast_loss = -F.logsigmoid(margin).mean()
+
+            # ── Total loss ────────────────────────────────────────────────────
+            loss = args.lambda_ce * (-logp_pos) + args.lambda_contrast * contrast_loss
+
+            if not loss.requires_grad:
+                print(f"[train] WARNING: loss has no grad_fn at step {step}, skipping", flush=True)
+                continue
+
+            if not torch.isfinite(loss):
+                print(
+                    f"[train] WARNING: non-finite loss={float(loss):.4f} at step {step}"
+                    f"  ce={float(-logp_pos):.4f}  contrast={float(contrast_loss):.4f}",
+                    flush=True,
+                )
+                continue
+
+            optimizer.zero_grad()
+            loss.backward()
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                adapter.parameters(), args.grad_clip,
+            ).item()
+
+            if not math.isfinite(grad_norm):
+                nan_params = [n for n, p in adapter.named_parameters()
+                              if p.grad is not None and not torch.isfinite(p.grad).all()]
+                print(
+                    f"[train] WARNING: non-finite grad_norm={grad_norm:.4f} at step {step}"
+                    f" | NaN grad params: {nan_params[:5]}",
+                    flush=True,
+                )
+                optimizer.zero_grad()
+            else:
+                optimizer.step()
+                if args.max_gamma is not None:
+                    with torch.no_grad():
+                        adapter.gamma.clamp_(0.0, args.max_gamma)
+
+            # ── Early stop: ratio explosion ───────────────────────────────────
+            pre_cap_ratio = info.get("pre_cap_ratio", info.get("effective_delta_to_base", 0.0))
+            if pre_cap_ratio > 0.5:
+                _high_ratio_streak += 1
+            else:
+                _high_ratio_streak = 0
+            if _high_ratio_streak >= 10:
+                print(
+                    f"[train] EARLY STOP: pre_cap_ratio={pre_cap_ratio:.3f} > 0.5 "
+                    f"for 10 consecutive steps. Saving and exiting.",
+                    flush=True,
+                )
+                _save_ckpt(out_dir / f"early_stop_step{step}.pt", adapter, optimizer, step)
+                raise SystemExit(0)
+
+            # ── Log ──────────────────────────────────────────────────────────
+            gamma      = abs(info.get("gamma",      0.0))
+            delta_norm = info.get("delta_norm",     0.0)
+            log = {
+                "step":                       step,
+                "epoch":                      epoch,
+                "train/loss":                 round(float(loss),              5),
+                "train/ce":                   round(float(-logp_pos.detach()), 5),
+                "train/logp_pos":             round(float(logp_pos.detach()),  5),
+                "train/logp_neg":             round(float(logp_neg),           5),
+                "train/contrast":             round(float(contrast_loss),      5),
+                "train/gamma":                round(gamma,                     5),
+                "train/delta_norm":           round(float(delta_norm),         4),
+                "train/grad_norm":            round(grad_norm,                 4),
+                "train/pre_cap_ratio":        round(float(pre_cap_ratio),      5),
+                "train/hard_cap_scale":       round(float(info.get("hard_cap_scale",  1.0)), 4),
+                "train/post_cap_ratio":       round(float(info.get("post_cap_ratio",  0.0)), 5),
+                "train/slot_entropy":         round(float(info.get("slot_attn_entropy", 0.0)), 4),
+                "train/delta_to_base":        round(float(info.get("delta_to_base",    0.0)), 5),
+            }
+            with open(log_path, "a") as lf:
+                lf.write(json.dumps(log) + "\n")
+            _wb_log({k: v for k, v in log.items() if k != "step"}, step)
+
+            if step % 20 == 0:
+                elapsed = time.time() - t0
+                print(
+                    f"[train] step={step}  loss={log['train/loss']:.4f}"
+                    f"  ce={log['train/ce']:.4f}"
+                    f"  contrast={log['train/contrast']:.4f}"
+                    f"  logp_pos={log['train/logp_pos']:.4f}"
+                    f"  logp_neg={log['train/logp_neg']:.4f}"
+                    f"  gamma={log['train/gamma']:.5f}"
+                    f"  pre_cap_ratio={log['train/pre_cap_ratio']:.5f}"
+                    f"  hard_cap_scale={log['train/hard_cap_scale']:.3f}"
+                    f"  elapsed={elapsed:.0f}s",
+                    flush=True,
+                )
+
+            if step % args.save_every == 0:
+                _save_ckpt(out_dir / f"ckpt_step{step}.pt", adapter, optimizer, step)
+
+            if step % args.eval_every == 0 and wandb_run:
+                gpt.eval()
+                adapter.eval()
+                _viz_generate(wrapper, adapter, adapted_cls, step, out_dir, wandb_run)
+                gpt.train()
+                adapter.train()
+
+            if step % args.eval_every == 0 and val_items and reward_model:
+                val_r = run_val_eval(val_items[:20], wrapper, reward_model, t5, args, device)
+                gpt.to(device=device, dtype=wrapper.dtype)
+                t5.model.to(device)
+                torch.cuda.empty_cache()
+
+                log_v = {"step": step, "val/hard_reward": round(val_r, 4)}
+                with open(log_path, "a") as lf:
+                    lf.write(json.dumps(log_v) + "\n")
+                _wb_log({"val/hard_reward": val_r}, step)
+                print(f"[train] val hard_reward={val_r:.4f}", flush=True)
+
+                if val_r > best_val_reward:
+                    best_val_reward = val_r
+                    _save_ckpt(out_dir / "best.pt", adapter, optimizer, step)
+                    print(f"[train] New best at step {step}", flush=True)
+
+                gpt.train()
+                adapter.train()
+
+        # reload dataset at epoch boundary (live mining support)
+        new_rows = clean_ds.reload()
+        if new_rows > 0:
+            print(f"[train] Epoch {epoch} end: +{new_rows} new rows → {len(clean_ds)} total", flush=True)
+
+    _save_ckpt(out_dir / f"final_step{step}.pt", adapter, optimizer, step)
+    print(f"[train] Done. Step {step}. Best val reward: {best_val_reward:.4f}")
+    if wandb_run:
+        wandb_run.finish()
+
+
+if __name__ == "__main__":
+    main()
