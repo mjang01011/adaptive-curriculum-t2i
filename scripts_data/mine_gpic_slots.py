@@ -298,6 +298,11 @@ class QwenVLMVerifier:
         self._model.eval()
 
     def score_statements(self, pil_image, statements: dict) -> dict:
+        """
+        Batch all statements for this image into a single forward pass.
+        padding_side='left' guarantees position -1 is the real last token for
+        every row in the batch, so logits[i, -1] is safe to read directly.
+        """
         import math
         self._load()
         from qwen_vl_utils import process_vision_info
@@ -310,24 +315,40 @@ class QwenVLMVerifier:
         unc_ids = [tok.encode(s, add_special_tokens=False)[0]
                    for s in ["uncertain", "Uncertain"] if tok.encode(s, add_special_tokens=False)]
 
-        results = {}
-        for key, stmt in statements.items():
+        # Build one chat message per statement, all referencing the same image.
+        # We track key order explicitly to avoid any dict-ordering ambiguity.
+        keys        = list(statements.keys())
+        all_texts   = []
+        all_images  = []
+        for key in keys:
             msg = [{"role": "user", "content": [
                 {"type": "image", "image": pil_image},
-                {"type": "text",  "text": stmt + _VLM_SUFFIX},
+                {"type": "text",  "text": statements[key] + _VLM_SUFFIX},
             ]}]
-            text_in = self._processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True)
+            text_in = self._processor.apply_chat_template(
+                msg, tokenize=False, add_generation_prompt=True,
+            )
             image_inputs, _ = process_vision_info(msg)
-            inputs = self._processor(text=[text_in], images=image_inputs, return_tensors="pt").to(self._model.device)
+            all_texts.append(text_in)
+            all_images.extend(image_inputs)   # process_vision_info returns a list
 
-            with torch.inference_mode():
-                out = self._model(**inputs)
-            logits = out.logits[0, -1]
+        inputs = self._processor(
+            text=all_texts, images=all_images,
+            return_tensors="pt", padding=True,
+        ).to(self._model.device)
 
-            def _best(ids):
-                return max((logits[i].item() for i in ids), default=-1e9)
+        with torch.inference_mode():
+            out = self._model(**inputs)
+        # out.logits: [N, seq_len, vocab] — with left-padding, -1 is always real last token
+        batch_logits = out.logits[:, -1, :]   # [N, vocab]
 
-            y_l, n_l, u_l = _best(yes_ids), _best(no_ids), _best(unc_ids)
+        def _best(logits_row, ids):
+            return max((logits_row[i].item() for i in ids), default=-1e9)
+
+        results = {}
+        for i, key in enumerate(keys):
+            lrow = batch_logits[i]
+            y_l, n_l, u_l = _best(lrow, yes_ids), _best(lrow, no_ids), _best(lrow, unc_ids)
             base = max(y_l, n_l, u_l)
             ey, en, eu = math.exp(y_l - base), math.exp(n_l - base), math.exp(u_l - base)
             tot = ey + en + eu + 1e-12
