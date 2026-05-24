@@ -401,6 +401,31 @@ def main():
     adapted_cls = attach_hard_cap_adapter(gpt, adapter, target_ratio=args.target_ratio)
     print(f"[train] Adapter: {count_adapter_params(adapter):,} params  target_ratio={args.target_ratio}", flush=True)
 
+    # ── Patch F.scaled_dot_product_attention ─────────────────────────────────
+    # Root cause of NaN gradients: PyTorch's SafeSoftmaxBackward produces NaN
+    # when the causal mask contains -inf (0 × -inf = NaN in the gradient).
+    # Fix: replace is_causal=True with an explicit finite additive bias (-1e4),
+    # which uses regular (not "safe") softmax and has NaN-free backward.
+    import torch.nn.functional as _F_torch
+    _orig_sdpa = _F_torch.scaled_dot_product_attention
+
+    def _nan_safe_sdpa(query, key, value, attn_mask=None, dropout_p=0.0,
+                       is_causal=False, **kwargs):
+        if is_causal:
+            Lq, Lk = query.shape[-2], key.shape[-2]
+            bias = torch.zeros(Lq, Lk, device=query.device, dtype=query.dtype)
+            bias.masked_fill_(
+                torch.ones(Lq, Lk, dtype=torch.bool, device=query.device).triu(diagonal=1),
+                -1e4,
+            )
+            attn_mask = bias if attn_mask is None else attn_mask + bias
+            is_causal  = False
+        return _orig_sdpa(query, key, value, attn_mask=attn_mask,
+                          dropout_p=dropout_p, is_causal=is_causal, **kwargs)
+
+    _F_torch.scaled_dot_product_attention = _nan_safe_sdpa
+    print("[train] Patched F.scaled_dot_product_attention: finite causal bias (-1e4) replaces is_causal=True", flush=True)
+
     # Cast GPT to float32 so backward through attention is numerically stable.
     # _apply() override in AdaptedCaptionEmbedder keeps the adapter in f32
     # regardless of what dtype GPT is moved to, so this is safe.
