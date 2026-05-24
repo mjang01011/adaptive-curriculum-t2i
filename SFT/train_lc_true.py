@@ -240,7 +240,7 @@ def run_val_eval(val_items, wrapper, reward_model, t5_model, args, device):
         reward_model._model.cpu()
         torch.cuda.empty_cache()
 
-    gpt.to(device=device, dtype=wrapper.dtype)
+    gpt.to(device=device)   # keep float32
     t5_model.model.to(device)
     gpt.eval()
 
@@ -302,8 +302,8 @@ def _viz_generate(wrapper, adapted_cls, step, out_dir, wandb_run):
     for emb, mask in zip(caption_embs, emb_masks):
         valid = int(mask.sum().item())
         new_embs.append(torch.cat([emb[valid:], emb[:valid]]))
-    c_indices   = (torch.stack(new_embs) * torch.flip(emb_masks, dims=[-1])[:, :, None]).to(device=device, dtype=wrapper.dtype)
-    c_emb_masks = torch.flip(emb_masks, dims=[-1]).to(device=device, dtype=wrapper.dtype)
+    c_indices   = (torch.stack(new_embs) * torch.flip(emb_masks, dims=[-1])[:, :, None]).to(device=device)  # float32
+    c_emb_masks = torch.flip(emb_masks, dims=[-1]).to(device=device)
     qzshape     = [len(_VIZ_PROMPTS), wrapper.codebook_embed_dim, ls, ls]
 
     def _gen(enabled):
@@ -401,6 +401,12 @@ def main():
     adapted_cls = attach_hard_cap_adapter(gpt, adapter, target_ratio=args.target_ratio)
     print(f"[train] Adapter: {count_adapter_params(adapter):,} params  target_ratio={args.target_ratio}", flush=True)
 
+    # Cast GPT to float32 so backward through attention is numerically stable.
+    # _apply() override in AdaptedCaptionEmbedder keeps the adapter in f32
+    # regardless of what dtype GPT is moved to, so this is safe.
+    gpt.float()
+    print("[train] GPT cast to float32 for stable backward", flush=True)
+
     # ── Optimizer ─────────────────────────────────────────────────────────────
     optimizer = torch.optim.AdamW(adapter.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
@@ -441,8 +447,7 @@ def main():
             from adaptive_curriculum.reward.vlm_reward import Qwen3VLRewardModel
             reward_model = Qwen3VLRewardModel(model_id=qwen_id)
 
-    # bf16 autocast for negative / monitoring passes only
-    amp_dtype = wrapper.dtype   # bfloat16
+    amp_dtype = torch.float32   # GPT is now float32 throughout
 
     # ── Training ──────────────────────────────────────────────────────────────
     best_val   = -float("inf")
@@ -483,15 +488,12 @@ def main():
             gpt.cls_embedding.uncond_prob = 0.0
             adapted_cls._enabled = True
 
-            # ── Positive pass: autocast DISABLED → f32 computation → stable grad ──
-            # bf16 weights + f32 input → PyTorch promotes all ops to f32.
-            # Backward through f32 attention is numerically stable.
-            with torch.autocast("cuda", enabled=False):
-                logits_pos, _ = gpt(
-                    idx=tokens[:, :-1],
-                    cond_idx=c_pos,          # already float32
-                    input_pos=None, targets=tokens, mask=None, valid=None,
-                )
+            # ── Positive pass: GPT is float32 → stable attention backward ──────
+            logits_pos, _ = gpt(
+                idx=tokens[:, :-1],
+                cond_idx=c_pos,          # float32, GPT is float32, no dtype mismatch
+                input_pos=None, targets=tokens, mask=None, valid=None,
+            )
 
             if torch.isnan(logits_pos).any() or torch.isinf(logits_pos).any():
                 print(f"[train] WARNING: NaN/inf in logits_pos step {step}, skipping", flush=True)
@@ -512,13 +514,12 @@ def main():
                 c_neg     = t5_encode(neg_texts, t5, device)
 
                 with torch.no_grad():
-                    with torch.autocast("cuda", dtype=amp_dtype, enabled=True):
-                        logits_neg, _ = gpt(
-                            idx=tokens[neg_indices, :-1],
-                            cond_idx=c_neg.to(dtype=amp_dtype),
-                            input_pos=None, targets=tokens[neg_indices],
-                            mask=None, valid=None,
-                        )
+                    logits_neg, _ = gpt(
+                        idx=tokens[neg_indices, :-1],
+                        cond_idx=c_neg,      # float32, matches GPT dtype
+                        input_pos=None, targets=tokens[neg_indices],
+                        mask=None, valid=None,
+                    )
                     if torch.isnan(logits_neg).any():
                         print(f"[train] WARNING: NaN in logits_neg step {step}, skipping contrast", flush=True)
                         logp_neg = logp_pos[neg_indices].detach() if hasattr(logp_pos, '__getitem__') else logp_pos.detach()
@@ -634,7 +635,7 @@ def main():
 
             if step % args.eval_every == 0 and val_items and reward_model:
                 val_r = run_val_eval(val_items[:20], wrapper, reward_model, t5, args, device)
-                gpt.to(device=device, dtype=wrapper.dtype)
+                gpt.to(device=device)   # keep float32
                 t5.model.to(device)
                 torch.cuda.empty_cache()
                 _wb_log({"val/hard_reward": val_r}, step)
