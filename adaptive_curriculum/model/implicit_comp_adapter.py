@@ -178,24 +178,23 @@ class AdaptedCaptionEmbedder(nn.Module):
 
     # ── Forward ───────────────────────────────────────────────────────────────
 
+    def to(self, *args, **kwargs):
+        # When gpt.to(dtype=bf16) is called (e.g. for val inference), keep adapter
+        # in float32 so its LayerNorm/MHA params don't conflict with C_base.float().
+        result = super().to(*args, **kwargs)
+        self.adapter.float()
+        return result
+
     def forward(self, caption, train, force_drop_ids=None):
         C_base = self.orig(caption, train, force_drop_ids)   # [B, 120, d_model]
         if self._enabled:
-            # Run adapter in float32: bf16 attention scores can exceed ln(65504)≈11
-            # causing softmax overflow; 0*NaN=NaN even through zero-init out_proj.
+            # Adapter always computes in float32 (stable attention, clean gradients).
             C_out_f32, info = self.adapter(C_base.float())
             if torch.isnan(C_out_f32).any() or torch.isinf(C_out_f32).any():
                 print("[adapter] WARNING: NaN/inf in adapter output, falling back to C_base", flush=True)
                 self._last_info = None
                 return C_base
             C_out = C_out_f32.to(dtype=C_base.dtype)
-            # Sanitize gradients at the bf16↔float32 boundary: the bf16 GPT backward
-            # can produce NaN/inf grads for C_out, which would corrupt float32 adapter
-            # params on the very first optimizer step.
-            if C_out.requires_grad:
-                C_out.register_hook(
-                    lambda g: torch.nan_to_num(g, nan=0.0, posinf=1.0, neginf=-1.0)
-                )
             self._last_info = info
             return C_out
         self._last_info = None

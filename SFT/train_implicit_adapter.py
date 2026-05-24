@@ -299,6 +299,12 @@ def main():
     n_adapter = count_adapter_params(adapter)
     print(f"[train] ImplicitCompositionAdapter: {n_adapter:,} trainable params  n_comp_q={args.n_comp_q}")
 
+    # Convert GPT to float32 for training: bf16 backward through 24 transformer
+    # layers consistently produces NaN gradients at C_out, making adapter untrainable.
+    # float32 forward+backward is numerically stable and still fits in 44GB.
+    gpt.float()
+    print("[train] GPT converted to float32 for stable gradients")
+
     # ── Optimizer ─────────────────────────────────────────────────────────────
     param_groups = [{"params": list(adapter.parameters()), "lr": args.lr}]
     if args.train_lora:
@@ -337,8 +343,9 @@ def main():
     # T5 stays on GPU — encode on the fly per batch (no large CPU cache needed)
     print("[train] T5 on-the-fly encoding (no cache)", flush=True)
 
-    use_amp   = args.precision in ("bf16", "fp16")
-    amp_dtype = wrapper.dtype if use_amp else None
+    # No autocast: GPT is float32 for stable gradients
+    use_amp   = False
+    amp_dtype = None
 
     # ── Val + reward model ────────────────────────────────────────────────────
     val_items    = None
@@ -395,7 +402,7 @@ def main():
             B_eff  = tokens.shape[0]
 
             # ── T5 conditioning ──────────────────────────────────────────────
-            c_indices = t5_encode(captions, t5, device).to(dtype=wrapper.dtype)
+            c_indices = t5_encode(captions, t5, device)  # float32
 
             # Guard: skip batch if conditioning or tokens have NaN/inf
             if torch.isnan(c_indices).any() or torch.isinf(c_indices).any():
@@ -437,7 +444,7 @@ def main():
                 if neg_indices:
                     neg_texts    = [neg_captions[i] for i in neg_indices]
                     neg_toks     = tokens[neg_indices]
-                    c_neg        = t5_encode(neg_texts, t5, device).to(dtype=wrapper.dtype)
+                    c_neg        = t5_encode(neg_texts, t5, device)  # float32
 
                     # logp under negative caption — no gradient (used as baseline)
                     with torch.no_grad():
@@ -520,8 +527,8 @@ def main():
 
             if step % args.eval_every == 0 and val_items and reward_model:
                 val_r = run_val_eval(val_items[:20], wrapper, reward_model, t5, args, device)
-                # Restore gpt + T5 to GPU for continued training
-                gpt.to(device=device, dtype=wrapper.dtype)
+                # Restore gpt to GPU in float32 (training dtype) and T5 to GPU
+                gpt.to(device=device, dtype=torch.float32)
                 t5.model.to(device)
                 torch.cuda.empty_cache()
 
