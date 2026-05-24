@@ -325,6 +325,12 @@ def main():
     t5  = wrapper.t5
     vq  = wrapper.vq_model
 
+    # Convert GPT to fp32 so that the backward pass through 36 frozen transformer
+    # layers stays in fp32.  In bf16, softmax backward over masked/zero positions
+    # produces 0/0 = NaN; those NaNs poison every adapter gradient via 0_tensor*NaN=NaN.
+    # The memory cost (~3 GB vs 1.5 GB) is acceptable since GPT has no optimizer state.
+    gpt.float()
+
     if args.freeze_llamagen and not args.train_lora:
         for p in gpt.parameters():
             p.requires_grad = False
@@ -512,14 +518,15 @@ def main():
                 ce_train_loss = torch.tensor(0.0, device=device)
             else:
                 # Positive caption pass: CE trains the adapter through frozen GPT.
-                with torch.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
-                    logits_pos, _ = gpt(
-                        idx=tokens[:, :-1],
-                        cond_idx=c_indices.to(dtype=wrapper.dtype),
-                        input_pos=None, targets=tokens, mask=None, valid=None,
-                    )
-                    ce_loss = F.cross_entropy(logits_pos.reshape(-1, logits_pos.shape[-1]), tokens.reshape(-1))
-                    logp_pos = sequence_log_prob(logits_pos, tokens)
+                # No autocast — must stay fp32 so backward through 36 frozen layers
+                # doesn't produce NaN (bf16 softmax backward with masked tokens = 0/0).
+                logits_pos, _ = gpt(
+                    idx=tokens[:, :-1],
+                    cond_idx=c_indices.float(),
+                    input_pos=None, targets=tokens, mask=None, valid=None,
+                )
+                ce_loss = F.cross_entropy(logits_pos.reshape(-1, logits_pos.shape[-1]), tokens.reshape(-1))
+                logp_pos = sequence_log_prob(logits_pos, tokens)
 
                 if torch.isnan(logits_pos).any():
                     print(f"[train] WARNING: NaN logits at step {step}, skipping batch", flush=True)
@@ -537,21 +544,19 @@ def main():
                     tokens_neg  = tokens[neg_indices]
                     if args.no_neg_grad:
                         with torch.no_grad():
-                            with torch.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
-                                logits_neg, _ = gpt(
-                                    idx=tokens_neg[:, :-1],
-                                    cond_idx=c_neg.to(dtype=wrapper.dtype),
-                                    input_pos=None, targets=tokens_neg, mask=None, valid=None,
-                                )
-                                logp_neg = sequence_log_prob(logits_neg, tokens_neg)
-                    else:
-                        with torch.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
                             logits_neg, _ = gpt(
                                 idx=tokens_neg[:, :-1],
-                                cond_idx=c_neg.to(dtype=wrapper.dtype),
+                                cond_idx=c_neg.float(),
                                 input_pos=None, targets=tokens_neg, mask=None, valid=None,
                             )
                             logp_neg = sequence_log_prob(logits_neg, tokens_neg)
+                    else:
+                        logits_neg, _ = gpt(
+                            idx=tokens_neg[:, :-1],
+                            cond_idx=c_neg.float(),
+                            input_pos=None, targets=tokens_neg, mask=None, valid=None,
+                        )
+                        logp_neg = sequence_log_prob(logits_neg, tokens_neg)
                     # Use the already-computed positive logits for the matching subset.
                     # This avoids a third GPT forward and keeps memory lower.
                     logp_pos_sub = sequence_log_prob(logits_pos[neg_indices], tokens_neg)
@@ -565,7 +570,7 @@ def main():
             try:
                 with torch.no_grad():
                     C_base_reg = gpt.cls_embedding.orig(
-                        c_indices[: min(B_eff, 2)].to(dtype=wrapper.dtype), train=False
+                        c_indices[: min(B_eff, 2)].float(), train=False
                     ).float()
                 C_out_reg, _ = adapter(C_base_reg)
                 eff_delta = C_out_reg - C_base_reg
@@ -657,8 +662,9 @@ def main():
 
             if step % args.eval_every == 0 and val_items and reward_model:
                 val_r = run_val_eval(val_items[:20], wrapper, reward_model, t5, args, device)
-                # Restore gpt to GPU (bf16 training dtype) and T5 to GPU
-                gpt.to(device=device, dtype=wrapper.dtype)
+                # Restore gpt to GPU in fp32 (val eval moved it to cpu/bf16) and T5 to GPU
+                gpt.to(device=device)
+                gpt.float()
                 t5.model.to(device)
                 torch.cuda.empty_cache()
 

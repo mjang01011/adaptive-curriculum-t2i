@@ -198,14 +198,6 @@ class AdaptedCaptionEmbedder(nn.Module):
                 print("[adapter] WARNING: NaN/inf in adapter output, falling back to C_base", flush=True)
                 self._last_info = None
                 return C_base
-            # Source 2: grad_C_out flowing back through 36 frozen bf16 transformer
-            # layers can itself be NaN/inf even when the forward loss is finite.
-            # gamma.grad = sum(delta * grad_C_out) = sum(0_tensor * NaN) = NaN.
-            # Fix: sanitize the incoming gradient before it fans out to adapter params.
-            if C_out_f32.requires_grad:
-                C_out_f32.register_hook(
-                    lambda g: torch.nan_to_num(g, nan=0.0, posinf=1e4, neginf=-1e4)
-                )
             C_out = C_out_f32.to(dtype=C_base.dtype)
             self._last_info = info
             return C_out
