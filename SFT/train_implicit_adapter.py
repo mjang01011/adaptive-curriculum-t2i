@@ -599,6 +599,13 @@ def main():
             if step % args.save_every == 0:
                 _save_ckpt(out_dir / f"ckpt_step{step}.pt", adapter, optimizer, step)
 
+            if step % args.eval_every == 0 and wandb_run:
+                gpt.eval()
+                adapter.eval()
+                _viz_generate(wrapper, adapter, adapted_cls, step, out_dir, wandb_run)
+                gpt.train()
+                adapter.train()
+
             if step % args.eval_every == 0 and val_items and reward_model:
                 val_r = run_val_eval(val_items[:20], wrapper, reward_model, t5, args, device)
                 # Restore gpt to GPU (bf16 training dtype) and T5 to GPU
@@ -622,6 +629,84 @@ def main():
     print(f"[train] Done. Step {step}. Best val reward: {best_val_reward:.4f}")
     if wandb_run:
         wandb_run.finish()
+
+
+_VIZ_PROMPTS = [
+    "A red cube on top of a blue sphere.",
+    "A small white cat sitting next to a large black dog.",
+    "A green apple to the left of a red orange on a wooden table.",
+    "A striped shirt hanging above a polka dot skirt.",
+]
+
+
+@torch.no_grad()
+def _viz_generate(wrapper, adapter, adapted_cls, step, out_dir, wandb_run):
+    """Generate 4 prompts with adapter ON and OFF, log side-by-side to W&B."""
+    import torchvision.transforms.functional as TF
+    from PIL import Image, ImageDraw, ImageFont
+    from autoregressive.models.generate import generate
+
+    gpt = wrapper.gpt
+    t5  = wrapper.t5
+    vq  = wrapper.vq_model
+    device = next(gpt.parameters()).device
+
+    caption_embs, emb_masks = t5.model.get_text_embeddings(_VIZ_PROMPTS)
+    new_embs = []
+    for emb, mask in zip(caption_embs, emb_masks):
+        valid = int(mask.sum().item())
+        new_embs.append(torch.cat([emb[valid:], emb[:valid]]))
+    c = torch.stack(new_embs) * torch.flip(emb_masks, dims=[-1])[:, :, None]
+    c = c.to(device=device, dtype=wrapper.dtype)
+    m = torch.flip(emb_masks, dims=[-1]).to(device=device, dtype=wrapper.dtype)
+
+    ls = wrapper.latent_size
+    qzshape = [len(_VIZ_PROMPTS), 8, ls, ls]
+
+    def _gen(enabled):
+        adapted_cls._enabled = enabled
+        torch.manual_seed(42)
+        idx = generate(gpt, c, ls ** 2, m, cfg_scale=7.5, temperature=1.0,
+                       top_k=2000, top_p=1.0, sample_logits=True)
+        imgs = vq.decode_code(idx, qzshape)  # [B, 3, H, W] in [-1, 1]
+        return [TF.to_pil_image(((s.float().clamp(-1, 1) + 1) / 2).cpu())
+                for s in imgs]
+
+    imgs_off = _gen(enabled=False)
+    imgs_on  = _gen(enabled=True)
+    adapted_cls._enabled = True
+
+    # Build side-by-side rows: [off | on] per prompt
+    W, H = imgs_off[0].size
+    pad, lh = 4, 18
+    canvas = Image.new("RGB", (2 * W + pad, len(_VIZ_PROMPTS) * (H + lh) + lh), (20, 20, 20))
+    draw   = ImageDraw.Draw(canvas)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
+    except Exception:
+        font = ImageFont.load_default()
+
+    draw.text((4, 2), "No adapter", fill=(200, 200, 200), font=font)
+    draw.text((W + pad + 4, 2), f"Adapter (step {step})", fill=(100, 220, 100), font=font)
+
+    for i, (off, on, prompt) in enumerate(zip(imgs_off, imgs_on, _VIZ_PROMPTS)):
+        y = lh + i * (H + lh)
+        canvas.paste(off, (0, y + lh))
+        canvas.paste(on,  (W + pad, y + lh))
+        draw.text((4, y + 2), prompt[:55], fill=(160, 160, 255), font=font)
+
+    out_path = out_dir / f"viz_step{step:05d}.png"
+    canvas.save(out_path)
+
+    if wandb_run:
+        try:
+            import wandb
+            wandb_run.log({"viz/comparison": wandb.Image(str(out_path),
+                           caption=f"step {step} | left=baseline, right=adapter")}, step=step)
+        except Exception as e:
+            print(f"[train] W&B image log failed: {e}")
+
+    print(f"[train] Viz saved → {out_path}")
 
 
 def _save_ckpt(path, adapter, optimizer, step):
