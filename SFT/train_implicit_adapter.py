@@ -447,7 +447,8 @@ def main():
             B_eff  = tokens.shape[0]
 
             # ── T5 conditioning (from cache — no T5 forward at train time) ──
-            c_indices = t5_lookup(captions, t5_cache, t5, device)
+            # Cast to model dtype (bf16) after lookup; cache stores float32
+            c_indices = t5_lookup(captions, t5_cache, t5, device).to(dtype=wrapper.dtype)
 
             # Guard: skip batch if conditioning or tokens have NaN/inf
             if torch.isnan(c_indices).any() or torch.isinf(c_indices).any():
@@ -478,7 +479,7 @@ def main():
                 if neg_indices:
                     neg_texts    = [neg_captions[i] for i in neg_indices]
                     neg_toks     = tokens[neg_indices]
-                    c_neg        = t5_lookup(neg_texts, t5_cache, t5, device)
+                    c_neg        = t5_lookup(neg_texts, t5_cache, t5, device).to(dtype=wrapper.dtype)
 
                     # logp under negative caption — no gradient (used as baseline)
                     with torch.no_grad():
