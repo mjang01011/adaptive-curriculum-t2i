@@ -508,6 +508,16 @@ def main():
             stats["num_records_seen"] += 1
             n_this_tar += 1
 
+            if stats["num_records_seen"] % 100 == 0:
+                elapsed = time.time() - t0
+                print(
+                    f"[mine] seen={stats['num_records_seen']}"
+                    f"  kept={stats['num_final_kept']}"
+                    f"  prefilter_pass={stats['num_prefilter_pass']}"
+                    f"  elapsed={elapsed:.0f}s",
+                    flush=True,
+                )
+
             ok, reason = prefilter_caption(meta)
             if not ok:
                 _reject(reason)
