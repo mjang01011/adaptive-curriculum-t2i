@@ -453,21 +453,27 @@ def main():
                             cond_idx=c_neg,
                             input_pos=None, targets=neg_toks, mask=None, valid=None,
                         )
-                        logp_neg = sequence_log_prob(logits_neg, neg_toks).detach()
+                    if not torch.isfinite(logits_neg).all():
+                        print(f"[train] WARNING: non-finite logits_neg at step {step}, skipping contrastive", flush=True)
+                    else:
+                        with torch.no_grad():
+                            logp_neg = sequence_log_prob(logits_neg, neg_toks).detach()
 
-                    # logp under correct caption — with gradient
-                    with torch.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
+                        # logp under correct caption — with gradient
                         logits_pos, _ = gpt(
                             idx=neg_toks[:, :-1],
                             cond_idx=c_indices[neg_indices],
                             input_pos=None, targets=neg_toks, mask=None, valid=None,
                         )
-                        logp_pos = sequence_log_prob(logits_pos, neg_toks)
-
-                    # -log sigmoid((logp_correct - logp_neg) / τ)
-                    contrast_loss = -F.logsigmoid(
-                        (logp_pos - logp_neg) / args.tau_contrast
-                    ).mean()
+                        if not torch.isfinite(logits_pos).all():
+                            print(f"[train] WARNING: non-finite logits_pos at step {step}, skipping contrastive", flush=True)
+                        else:
+                            logp_pos = sequence_log_prob(logits_pos, neg_toks)
+                            if torch.isfinite(logp_neg) and torch.isfinite(logp_pos):
+                                # -log sigmoid((logp_correct - logp_neg) / τ)
+                                contrast_loss = -F.logsigmoid(
+                                    (logp_pos - logp_neg) / args.tau_contrast
+                                ).mean()
 
             # ── Residual regularisation ──────────────────────────────────────
             info       = adapted_cls.last_adapter_info or {}
@@ -478,8 +484,15 @@ def main():
             loss = ce_loss + args.lambda_contrast * contrast_loss + reg_loss
 
             if not loss.requires_grad:
-                # Adapter fell back to C_base (NaN output) — no grad_fn, skip step
                 print(f"[train] WARNING: loss has no grad_fn at step {step} (adapter fallback), skipping", flush=True)
+                continue
+
+            if not torch.isfinite(loss):
+                print(
+                    f"[train] WARNING: non-finite loss={float(loss):.4f} at step {step}"
+                    f" (ce={float(ce_loss):.4f} contrast={float(contrast_loss):.4f}), skipping",
+                    flush=True,
+                )
                 continue
 
             optimizer.zero_grad()
@@ -489,7 +502,13 @@ def main():
                 args.grad_clip,
             ).item()
             if not math.isfinite(grad_norm):
-                print(f"[train] WARNING: non-finite grad_norm={grad_norm:.4f} at step {step}, skipping optimizer", flush=True)
+                nan_params = [n for n, p in adapter.named_parameters()
+                              if p.grad is not None and not torch.isfinite(p.grad).all()]
+                print(
+                    f"[train] WARNING: non-finite grad_norm={grad_norm:.4f} at step {step}"
+                    f" | NaN grad params: {nan_params[:5]}",
+                    flush=True,
+                )
                 optimizer.zero_grad()
             else:
                 optimizer.step()
