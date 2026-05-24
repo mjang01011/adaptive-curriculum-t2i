@@ -198,9 +198,9 @@ def t5_lookup(texts: List[str], cache: dict, t5_model, device: str) -> torch.Ten
         result[i] = emb.to(device)
     if misses_text:
         live = t5_encode(misses_text, t5_model, device)
-        for i, emb in zip(misses_idx, live):
-            result[i] = emb
-            cache[misses_text[misses_idx.index(i)]] = emb.cpu()
+        for idx, emb in zip(misses_idx, live):
+            result[idx] = emb
+            cache[misses_text[misses_idx.index(idx)]] = emb.cpu()
 
     return torch.stack(result)
 
@@ -482,7 +482,6 @@ def main():
                     c_neg        = t5_lookup(neg_texts, t5_cache, t5, device)
 
                     # logp under negative caption — no gradient (used as baseline)
-                    gpt.eval()
                     with torch.no_grad():
                         logits_neg, _ = gpt(
                             idx=neg_toks[:, :-1],
@@ -490,7 +489,6 @@ def main():
                             input_pos=None, targets=neg_toks, mask=None, valid=None,
                         )
                         logp_neg = sequence_log_prob(logits_neg, neg_toks).detach()
-                    gpt.train()
 
                     # logp under correct caption — with gradient
                     with torch.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
@@ -554,7 +552,12 @@ def main():
                 _save_ckpt(out_dir / f"ckpt_step{step}.pt", adapter, optimizer, step)
 
             if step % args.eval_every == 0 and val_items and reward_model:
-                val_r = run_val_eval(val_items[:20], wrapper, reward_model, args, device)
+                val_r = run_val_eval(val_items[:20], wrapper, reward_model, t5, args, device)
+                # Restore gpt + T5 to GPU for continued training
+                gpt.to(device=device, dtype=wrapper.dtype)
+                t5.model.to(device)
+                torch.cuda.empty_cache()
+
                 log_v = {"step": step, "val/hard_reward": round(val_r, 4)}
                 with open(log_path, "a") as lf:
                     lf.write(json.dumps(log_v) + "\n")
@@ -582,29 +585,63 @@ def _save_ckpt(path, adapter, optimizer, step):
     print(f"[train] Saved {path}")
 
 
-def run_val_eval(val_items, wrapper, reward_model, args, device):
+def run_val_eval(val_items, wrapper, reward_model, t5_model, args, device):
+    """
+    Two-phase val to avoid OOM on 48GB GPU:
+      Phase 1 — generate images: gpt + T5 on GPU, Qwen on CPU
+      Phase 2 — score images:    gpt + T5 on CPU, Qwen on GPU
+    """
     from autoregressive.models.generate import generate
     import torchvision.transforms.functional as TF
+
     gpt = wrapper.gpt
-    gpt.eval()
     ls  = wrapper.latent_size
-    scores = []
+
+    # ── Phase 1: generate all images (gpt + T5 on GPU) ───────────────────────
+    if hasattr(reward_model, "_model") and reward_model._model is not None:
+        reward_model._model.cpu()
+        torch.cuda.empty_cache()
+
+    gpt.to(device=device, dtype=wrapper.dtype)
+    t5_model.model.to(device)
+    gpt.eval()
+
+    pils = []
     for item in val_items:
         with torch.no_grad():
             c_indices, c_emb_masks = wrapper._get_conditioning([item])
         qzshape = [1, wrapper.codebook_embed_dim, ls, ls]
         with torch.no_grad():
-            idx = generate(
+            idx     = generate(
                 gpt, c_indices, ls ** 2, c_emb_masks,
                 cfg_scale=wrapper.cfg_scale, temperature=wrapper.temperature,
                 top_k=wrapper.top_k, top_p=wrapper.top_p, sample_logits=True,
             )
             decoded = wrapper.vq_model.decode_code(idx, qzshape)
             img_t   = (decoded[0].float().clamp(-1, 1) + 1) / 2
-        pil = TF.to_pil_image(img_t.cpu())
+        pils.append(TF.to_pil_image(img_t.cpu()))
+    wrapper._disable_kv_cache()
+
+    # ── Phase 2: score with Qwen (gpt + T5 on CPU, Qwen on GPU) ──────────────
+    gpt.cpu()
+    t5_model.model.cpu()
+    torch.cuda.empty_cache()
+
+    if hasattr(reward_model, "_model") and reward_model._model is not None:
+        reward_model._model.to(device)
+    elif hasattr(reward_model, "_load"):
+        reward_model._load()   # lazy-loads directly to GPU
+
+    scores = []
+    for pil, item in zip(pils, val_items):
         result = reward_model.score_images_batch([(pil, item)], mode=args.reward_mode)
         scores.append(float(result[0]["score"]))
-    wrapper._disable_kv_cache()
+
+    # Offload Qwen again so training can resume on GPU
+    if hasattr(reward_model, "_model") and reward_model._model is not None:
+        reward_model._model.cpu()
+    torch.cuda.empty_cache()
+
     return sum(scores) / len(scores) if scores else 0.0
 
 
