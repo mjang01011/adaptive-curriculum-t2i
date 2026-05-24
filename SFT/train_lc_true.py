@@ -449,11 +449,22 @@ def main():
 
     amp_dtype = torch.float32   # GPT is now float32 throughout
 
+    # Force SDPA to use the math (reference) backend.
+    # Flash and mem-efficient backends can produce NaN in float32 backward through
+    # frozen causal-masked attention on some PyTorch/CUDA versions.
+    try:
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        print("[train] SDPA: using math backend (flash+memeff disabled)", flush=True)
+    except Exception as e:
+        print(f"[train] SDPA backend override failed (non-fatal): {e}", flush=True)
+
     # ── Training ──────────────────────────────────────────────────────────────
     best_val   = -float("inf")
     step       = start_step
     t0         = time.time()
     nan_streak = 0
+    _anomaly_steps = 3  # run anomaly detection on first N steps to locate NaN source
 
     for epoch in range(args.num_epochs):
         gpt.train()
@@ -543,7 +554,11 @@ def main():
                 continue
 
             optimizer.zero_grad()
-            loss.backward()
+            if step <= _anomaly_steps:
+                with torch.autograd.set_detect_anomaly(True):
+                    loss.backward()
+            else:
+                loss.backward()
 
             # Gradient diagnostics
             nan_grad_params = [(n, p) for n, p in adapter.named_parameters()

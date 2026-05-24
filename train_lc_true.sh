@@ -52,8 +52,8 @@ python3 SFT/train_lc_true.py \
     --vq-ckpt      $PRETRAINED/vq_ds16_t2i.pt \
     --t5-path      $PRETRAINED/t5-ckpt \
     --use-raw-caption \
-    --num-epochs   60 \
-    --batch-size   2 \
+    --num-epochs   100 \
+    --batch-size   16 \
     --lr           2e-6 \
     --lambda-ce    1.0 \
     --lambda-contrast 0.05 \
@@ -61,8 +61,8 @@ python3 SFT/train_lc_true.py \
     --target-ratio  0.05 \
     --max-gamma     0.01 \
     --grad-clip     0.5 \
-    --eval-every   200 \
-    --save-every   200 \
+    --eval-every   1000 \
+    --save-every   10000 \
     --dl-workers   2 \
     --min-rows     1 \
     --run-name     $RUN_NAME \
