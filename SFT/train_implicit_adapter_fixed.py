@@ -601,23 +601,38 @@ def main():
 
             optimizer.zero_grad()
             loss.backward()
+
+            # Zero out NaN/inf grads before clipping.  extract_attn + comp_queries
+            # get NaN grads from a PyTorch MHA backward edge case (need_weights=True,
+            # zero upstream grad, asymmetric Q/KV lengths).  The real learning signal
+            # lives in out_proj.weight and inject_attn; don't skip the whole step.
+            nan_params = []
+            for n, p in adapter.named_parameters():
+                if p.grad is not None and not torch.isfinite(p.grad).all():
+                    nan_params.append(n)
+                    p.grad = None
+            if nan_params:
+                print(
+                    f"[train] NOTE: NaN grads zeroed for {nan_params[:5]}"
+                    f" (stepping on valid grads)",
+                    flush=True,
+                )
+
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 [p for pg in optimizer.param_groups for p in pg["params"]],
                 args.grad_clip,
             ).item()
-            if not math.isfinite(grad_norm):
-                nan_params = [n for n, p in adapter.named_parameters()
-                              if p.grad is not None and not torch.isfinite(p.grad).all()]
-                print(
-                    f"[train] WARNING: non-finite grad_norm={grad_norm:.4f} at step {step}"
-                    f" | NaN grad params: {nan_params[:5]}",
-                    flush=True,
-                )
-                optimizer.zero_grad()
-            else:
+            if math.isfinite(grad_norm):
                 optimizer.step()
                 if args.max_gamma is not None and args.max_gamma > 0 and hasattr(adapter, "gamma"):
                     adapter.gamma.data.clamp_(min=-args.max_gamma, max=args.max_gamma)
+            else:
+                print(
+                    f"[train] WARNING: grad_norm still non-finite after NaN zeroing"
+                    f" at step {step}, skipping",
+                    flush=True,
+                )
+                optimizer.zero_grad()
 
             # refresh diagnostics after possible clamp
             gamma = abs(float(getattr(adapter, "gamma", torch.tensor(0.)).detach().cpu())) if hasattr(adapter, "gamma") else gamma
