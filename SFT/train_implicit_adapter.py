@@ -144,7 +144,8 @@ def t5_encode(texts: List[str], t5_model, device: str, cls_token_num: int = 120)
         valid = int(mask.sum().item())
         new_embs.append(torch.cat([emb[valid:], emb[:valid]]))
         new_masks.append(torch.flip(mask, dims=[-1]))
-    c_indices = (torch.stack(new_embs) * torch.stack(new_masks)[:, :, None]).to(device)
+    # float32 to avoid bf16 overflow/NaN in conditioning tokens
+    c_indices = (torch.stack(new_embs) * torch.stack(new_masks)[:, :, None]).float().to(device)
     return c_indices
 
 
@@ -416,16 +417,6 @@ def main():
     t0   = time.time()
 
     for epoch in range(args.num_epochs):
-        # Reload dataset each epoch to pick up rows added by concurrent miner
-        new_rows = train_ds.reload()
-        if new_rows > 0:
-            print(f"[train] Epoch {epoch}: dataset grew by {new_rows} → {len(train_ds)} total")
-            extra = build_t5_cache(train_ds, t5, device)   # encodes only new texts (cache hits skip)
-            t5_cache.update(extra)
-            train_dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
-                                  collate_fn=lambda x: x, num_workers=args.dl_workers,
-                                  pin_memory=True, persistent_workers=args.dl_workers > 0)
-
         gpt.train()
         adapter.train()
 
@@ -457,6 +448,14 @@ def main():
 
             # ── T5 conditioning (from cache — no T5 forward at train time) ──
             c_indices = t5_lookup(captions, t5_cache, t5, device)
+
+            # Guard: skip batch if conditioning or tokens have NaN/inf
+            if torch.isnan(c_indices).any() or torch.isinf(c_indices).any():
+                print(f"[train] WARNING: NaN/inf in c_indices at step {step}, skipping batch", flush=True)
+                continue
+            if torch.isnan(tokens.float()).any():
+                print(f"[train] WARNING: NaN in tokens at step {step}, skipping batch", flush=True)
+                continue
 
             gpt.cls_embedding.uncond_prob = 0.0
 
