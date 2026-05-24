@@ -645,9 +645,31 @@ def main():
                         dim=-1,
                     ).mean().item())
 
-                C_out_pos, info = adapter(C_base_pos.float())
+                C_out_pos_raw, adapter_info = adapter(C_base_pos.float())
                 with torch.no_grad():
-                    C_out_neg, _ = adapter(C_base_neg.float())
+                    C_out_neg_raw, _ = adapter(C_base_neg.float())
+
+                # Apply hard cap inline — keeps gradient consistent with inference.
+                # Without this the contrastive loss drives delta to arbitrary size.
+                def _apply_cap(C_out_raw, C_base_f32, ratio_target, with_grad=True):
+                    delta     = C_out_raw - C_base_f32
+                    base_norm = C_base_f32.norm().detach() + 1e-8
+                    ratio     = delta.norm() / base_norm
+                    scale     = torch.clamp(
+                        torch.tensor(ratio_target, device=delta.device) / (ratio + 1e-8),
+                        max=1.0,
+                    )
+                    if not with_grad:
+                        scale = scale.detach()
+                    return C_base_f32 + delta * scale, float(ratio.item()), float(scale.item())
+
+                C_out_pos, pre_cap_pos, scale_pos = _apply_cap(
+                    C_out_pos_raw, C_base_pos.float(), args.target_ratio, with_grad=True,
+                )
+                with torch.no_grad():
+                    C_out_neg, _, _ = _apply_cap(
+                        C_out_neg_raw, C_base_neg.float(), args.target_ratio, with_grad=False,
+                    )
 
                 B_n = C_out_pos.shape[0]
                 cos_sim       = F.cosine_similarity(
@@ -655,11 +677,18 @@ def main():
                 )
                 contrast_loss = cos_sim.mean()
 
-                # Hinge reg: penalise delta ratio > target
-                base_norm  = C_base_pos.float().norm().item()
-                effective  = (C_out_pos - C_base_pos.float()).norm() / (base_norm + 1e-8)
+                # Build unified info from adapter_info + cap diagnostics
+                info = dict(adapter_info)
+                info["pre_cap_ratio"]  = pre_cap_pos
+                info["hard_cap_scale"] = scale_pos
+                base_norm_scalar = C_base_pos.float().norm().item() + 1e-8
+                info["post_cap_ratio"] = float(
+                    (C_out_pos - C_base_pos.float()).detach().norm().item() / base_norm_scalar
+                )
+
+                # Optional hinge reg on top of hard cap
                 if args.lambda_delta_ratio > 0:
-                    excess   = torch.relu(effective - args.delta_ratio_target)
+                    excess   = torch.relu(torch.tensor(pre_cap_pos, device=device) - args.delta_ratio_target)
                     reg_loss = args.lambda_delta_ratio * excess ** 2
 
             # ── Total loss ────────────────────────────────────────────────────
@@ -714,15 +743,18 @@ def main():
                     with torch.no_grad():
                         adapter.gamma.clamp_(0.0, args.max_gamma)
 
-            # ── Early stop: ratio explosion ───────────────────────────────────
-            pre_cap_ratio = info.get("pre_cap_ratio", info.get("effective_delta_to_base", 0.0))
-            if pre_cap_ratio > 0.5:
+            # ── Early stop: post-cap ratio shouldn't explode; pre-cap can be large
+            # (that's expected — the cap handles it). Stop only if the CAPPED output
+            # exceeds 0.5 (means the cap itself is broken or target_ratio is huge).
+            pre_cap_ratio  = float(info.get("pre_cap_ratio",  info.get("effective_delta_to_base", 0.0)))
+            post_cap_ratio = float(info.get("post_cap_ratio", pre_cap_ratio))
+            if post_cap_ratio > 0.5:
                 _high_ratio_streak += 1
             else:
                 _high_ratio_streak = 0
             if _high_ratio_streak >= 10:
                 print(
-                    f"[train] EARLY STOP: pre_cap_ratio={pre_cap_ratio:.3f} > 0.5 "
+                    f"[train] EARLY STOP: post_cap_ratio={post_cap_ratio:.3f} > 0.5 "
                     f"for 10 consecutive steps. Saving and exiting.",
                     flush=True,
                 )
