@@ -188,12 +188,8 @@ class AdaptedCaptionEmbedder(nn.Module):
     def forward(self, caption, train, force_drop_ids=None):
         C_base = self.orig(caption, train, force_drop_ids)   # [B, 120, d_model]
         if self._enabled:
-            # Source 1: extract_attn runs inside bf16 autocast during gpt.forward().
-            # With 120 KV tokens, QK^T can overflow bf16, producing NaN softmax values
-            # saved in the autograd graph — backward computes NaN * 0 = NaN even with
-            # zero upstream gradient. Fix: disable autocast so the adapter runs in fp32.
-            with torch.autocast("cuda", enabled=False):
-                C_out_f32, info = self.adapter(C_base.float())
+            # Adapter always computes in float32 (stable attention, clean gradients).
+            C_out_f32, info = self.adapter(C_base.float())
             if torch.isnan(C_out_f32).any() or torch.isinf(C_out_f32).any():
                 print("[adapter] WARNING: NaN/inf in adapter output, falling back to C_base", flush=True)
                 self._last_info = None

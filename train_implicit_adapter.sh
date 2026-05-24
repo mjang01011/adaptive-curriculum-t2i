@@ -57,6 +57,7 @@ python3 SFT/train_implicit_adapter.py \
     --batch-size   8 \
     --lr           1e-4 \
     --lambda-contrast 0.1 \
+    --lambda-delta  1e-3 \
     --tau-contrast 0.1 \
     --eval-every   500 \
     --save-every   500 \
