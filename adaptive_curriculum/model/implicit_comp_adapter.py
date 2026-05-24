@@ -184,6 +184,10 @@ class AdaptedCaptionEmbedder(nn.Module):
             # Run adapter in float32: bf16 attention scores can exceed ln(65504)≈11
             # causing softmax overflow; 0*NaN=NaN even through zero-init out_proj.
             C_out_f32, info = self.adapter(C_base.float())
+            if torch.isnan(C_out_f32).any() or torch.isinf(C_out_f32).any():
+                print("[adapter] WARNING: NaN/inf in adapter output, falling back to C_base", flush=True)
+                self._last_info = None
+                return C_base
             C_out = C_out_f32.to(dtype=C_base.dtype)
             self._last_info = info
             return C_out

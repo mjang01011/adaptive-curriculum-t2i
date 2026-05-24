@@ -389,6 +389,10 @@ def main():
 
     # ── T5 cache (encode all captions once, reuse every step) ─────────────────
     t5_cache = build_t5_cache(train_ds, t5, device)
+    # T5 no longer needed on GPU — cache has everything; offload to free ~3GB
+    t5.model.cpu()
+    torch.cuda.empty_cache()
+    print("[train] T5 offloaded to CPU after cache build", flush=True)
 
     use_amp   = args.precision in ("bf16", "fp16")
     amp_dtype = wrapper.dtype if use_amp else None
@@ -468,7 +472,15 @@ def main():
                     input_pos=None, targets=tokens, mask=None, valid=None,
                 )
                 if torch.isnan(logits).any():
-                    print(f"[train] WARNING: NaN logits at step {step}, skipping", flush=True)
+                    info = adapted_cls.last_adapter_info or {}
+                    print(
+                        f"[train] WARNING: NaN logits at step {step}"
+                        f" | c_max={c_indices.abs().max():.2f}"
+                        f" | gamma={info.get('gamma', float('nan')):.5f}"
+                        f" | delta_norm={info.get('delta_norm', float('nan')):.4f}"
+                        f" | eff_d/b={info.get('effective_delta_to_base', float('nan')):.5f}",
+                        flush=True,
+                    )
                     continue
                 ce_loss = F.cross_entropy(
                     logits.reshape(-1, logits.shape[-1]),
