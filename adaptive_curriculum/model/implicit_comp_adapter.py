@@ -188,8 +188,11 @@ class AdaptedCaptionEmbedder(nn.Module):
     def forward(self, caption, train, force_drop_ids=None):
         C_base = self.orig(caption, train, force_drop_ids)   # [B, 120, d_model]
         if self._enabled:
-            # Adapter always computes in float32 (stable attention, clean gradients).
-            C_out_f32, info = self.adapter(C_base.float())
+            # Disable autocast so the adapter truly runs in fp32 even when called
+            # from inside a bf16 autocast context (extract_attn over 120 KV tokens
+            # overflows in bf16 backward and produces NaN grads otherwise).
+            with torch.autocast("cuda", enabled=False):
+                C_out_f32, info = self.adapter(C_base.float())
             if torch.isnan(C_out_f32).any() or torch.isinf(C_out_f32).any():
                 print("[adapter] WARNING: NaN/inf in adapter output, falling back to C_base", flush=True)
                 self._last_info = None
