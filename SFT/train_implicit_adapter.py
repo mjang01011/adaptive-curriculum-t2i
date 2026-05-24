@@ -343,9 +343,10 @@ def main():
     from adaptive_curriculum.model.implicit_comp_adapter import (
         ImplicitCompositionAdapter, attach_implicit_adapter, count_adapter_params,
     )
+    # Adapter stays in float32 — bf16 attention softmax can overflow
     adapter     = ImplicitCompositionAdapter(
         d_model=args.d_model, n_comp_q=args.n_comp_q, n_heads=args.n_heads,
-    ).to(device=device, dtype=wrapper.dtype)
+    ).to(device=device)
     adapted_cls = attach_implicit_adapter(gpt, adapter)
 
     n_adapter = count_adapter_params(adapter)
@@ -466,6 +467,9 @@ def main():
                     cond_idx=c_indices,
                     input_pos=None, targets=tokens, mask=None, valid=None,
                 )
+                if torch.isnan(logits).any():
+                    print(f"[train] WARNING: NaN logits at step {step}, skipping", flush=True)
+                    continue
                 ce_loss = F.cross_entropy(
                     logits.reshape(-1, logits.shape[-1]),
                     tokens.reshape(-1),

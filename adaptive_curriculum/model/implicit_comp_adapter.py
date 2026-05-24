@@ -181,7 +181,10 @@ class AdaptedCaptionEmbedder(nn.Module):
     def forward(self, caption, train, force_drop_ids=None):
         C_base = self.orig(caption, train, force_drop_ids)   # [B, 120, d_model]
         if self._enabled:
-            C_out, info = self.adapter(C_base)
+            # Run adapter in float32: bf16 attention scores can exceed ln(65504)≈11
+            # causing softmax overflow; 0*NaN=NaN even through zero-init out_proj.
+            C_out_f32, info = self.adapter(C_base.float())
+            C_out = C_out_f32.to(dtype=C_base.dtype)
             self._last_info = info
             return C_out
         self._last_info = None
