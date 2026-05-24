@@ -67,14 +67,21 @@ class CompDataset(Dataset):
 
     def _load(self):
         rows = []
+        skipped = 0
         with open(self.jsonl_path) as f:
             for line in f:
                 line = line.strip()
                 if line:
                     try:
-                        rows.append(json.loads(line))
+                        row = json.loads(line)
+                        if not row.get("negative_captions"):
+                            skipped += 1
+                            continue
+                        rows.append(row)
                     except json.JSONDecodeError:
                         pass   # partial line written mid-flush — skip
+        if skipped:
+            print(f"[dataset] Skipped {skipped} rows with no negative_captions (kept {len(rows)})", flush=True)
         self.rows = rows
 
     def reload(self) -> int:
@@ -431,15 +438,13 @@ def main():
             info = adapted_cls.last_adapter_info or {}
 
             # ── Embedding contrastive — gradient only through adapter ─────────
-            # Get C_base from cap_proj directly (no adapter forward, no GPT backward).
-            # Then call adapter() with grad — update only adapter weights.
+            # Get C_base from cap_proj directly (no GPT backward).
+            # Gradient flows only through the adapter's own MHA layers (float32).
             contrast_loss = torch.tensor(0.0, device=device)
-            neg_indices   = []
-            if args.lambda_contrast > 0:
-                neg_indices = [i for i, n in enumerate(neg_captions) if n is not None]
-            if neg_indices:
+            neg_indices   = [i for i, n in enumerate(neg_captions) if n is not None]
+            if args.lambda_contrast > 0 and neg_indices:
                 neg_texts = [neg_captions[i] for i in neg_indices]
-                c_neg     = t5_encode(neg_texts, t5, device)   # float32
+                c_neg     = t5_encode(neg_texts, t5, device)
 
                 with torch.no_grad():
                     C_base_pos = gpt.cls_embedding.orig(

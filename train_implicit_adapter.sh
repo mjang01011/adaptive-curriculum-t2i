@@ -52,6 +52,7 @@ python3 SFT/train_implicit_adapter.py \
     --vq-ckpt      $PRETRAINED/vq_ds16_t2i.pt \
     --t5-path      $PRETRAINED/t5-ckpt \
     --freeze-llamagen \
+    --use-raw-caption \
     --num-epochs   5 \
     --batch-size   32 \
     --lr           1e-4 \

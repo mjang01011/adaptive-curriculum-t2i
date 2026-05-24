@@ -78,10 +78,18 @@ RELATION_MAP = {
 }
 _RELATION_KEYS_SORTED = sorted(RELATION_MAP, key=len, reverse=True)
 
+# Words that cannot be the head of a noun phrase (prepositions, auxiliaries, etc.)
+_NOUN_STOPWORDS = frozenset({
+    "in", "on", "at", "by", "for", "of", "to", "up", "as", "is", "are",
+    "it", "be", "do", "an", "a", "the", "and", "or", "but", "not",
+    "was", "were", "has", "have", "had", "this", "that", "with", "from",
+    "into", "onto", "over", "under", "near", "off", "out", "via",
+})
+
 _ENTITY_PAT = re.compile(
     r"\b(?:a|an|the)\s+"
     r"((?:(?:" + "|".join(re.escape(a) for a in sorted(ATTRIBUTE_WORDS, key=len, reverse=True)) + r")\s+){0,4})"
-    r"([a-z][a-z\-]*(?:\s+[a-z][a-z\-]*)?)\b",
+    r"([a-z][a-z\-]+(?:\s+[a-z][a-z\-]+)?)\b",
     re.IGNORECASE,
 )
 
@@ -168,6 +176,12 @@ def _extract_entities(caption: str) -> List[dict]:
         seen_spans.append((m.start(), m.end()))
         attrs = [a for a in m.group(1).split() if a in ATTRIBUTE_WORDS]
         noun  = m.group(2).strip()
+        # Drop trailing stop words captured by the optional second-word slot
+        # e.g. "woman in" → "woman",  "dress that" → "dress"
+        words = noun.split()
+        while len(words) > 1 and words[-1].lower() in _NOUN_STOPWORDS:
+            words = words[:-1]
+        noun = " ".join(words)
         if noun and len(noun) <= 30:
             entities.append({"attrs": attrs, "noun": noun})
         if len(entities) >= 4:
@@ -176,10 +190,15 @@ def _extract_entities(caption: str) -> List[dict]:
 
 
 def build_canonical_caption(caption: str) -> str:
-    """Rule-based canonical form. Used as a cleaner training input."""
+    """
+    Canonical form for captions with a clear spatial/relational structure.
+    Only rewrites when we can produce a clean "A X <rel> a Y." template;
+    otherwise returns the raw caption unchanged so training data stays valid.
+    """
     entities = _extract_entities(caption)
     if not entities:
         return caption
+
     parts = []
     for e in entities:
         attr_str = " ".join(e["attrs"])
@@ -192,12 +211,15 @@ def build_canonical_caption(caption: str) -> str:
             relation_phrase = RELATION_MAP[rp]
             break
 
+    # Only rewrite if we have two entities AND an explicit spatial relation.
+    # "A X and a Y." loses the verb/predicate and produces nonsensical training
+    # captions for sentences like "A woman in a blue dress dances." Fall back to
+    # the raw caption for attribute-only cases.
     if len(parts) >= 2 and relation_phrase and relation_phrase != "with":
-        return f"A {parts[0]} {relation_phrase} a {parts[1]}."
-    elif len(parts) >= 2:
-        return f"A {parts[0]} and a {parts[1]}."
-    elif len(parts) == 1:
-        return f"A {parts[0]}."
+        canonical = f"A {parts[0]} {relation_phrase} a {parts[1]}."
+        # Sanity check: canonical must contain at least one attribute word
+        if any(a in canonical.lower() for a in ATTRIBUTE_WORDS):
+            return canonical
     return caption
 
 
@@ -269,6 +291,149 @@ def generate_negatives(caption: str, n_negatives: int = 3) -> List[str]:
             negatives.append(n)
 
     return negatives[:n_negatives]
+
+
+# ---------------------------------------------------------------------------
+# LLM-based negative generation
+# ---------------------------------------------------------------------------
+
+_NEGATIVE_SYSTEM = (
+    "You are a dataset curator for compositional image understanding. "
+    "Your job is to generate hard negative captions — captions that describe the WRONG "
+    "composition of the same objects as the original caption."
+)
+
+_NEGATIVE_USER_TEMPLATE = """\
+# Task
+Given an image caption, generate {n} hard negative captions for contrastive learning.
+
+# What makes a GOOD hard negative
+- Contains the EXACT SAME objects as the original (same nouns, same count)
+- Changes ONLY attributes (colors, sizes, textures, materials) OR spatial/relational bindings
+- Is grammatically correct and sounds like natural image description language
+- A person looking at the correct image would immediately know the negative is WRONG
+- Is NOT a paraphrase, synonym substitution, or vague rewording
+
+# Perturbation types — apply whichever are relevant to this caption
+TYPE A  Attribute swap      — exchange a color/material/size/texture between two objects
+        e.g. "a red apple next to a green pear" → "a green apple next to a red pear"
+TYPE B  Spatial reversal    — flip left↔right, above↔below, in-front-of↔behind, on-top-of↔under
+        e.g. "a mug to the left of a plate" → "a mug to the right of a plate"
+TYPE C  Attribute change    — replace one attribute with a different plausible value for that object
+        e.g. "a woman in a blue dress" → "a woman in a red dress"
+TYPE D  Relation change     — change the action or spatial relation while keeping all objects
+        e.g. "a cat sitting next to a dog" → "a cat sitting on top of a dog"
+
+# Few-shot examples
+
+Caption: "A red cube to the left of a blue sphere on a white table."
+Negative 1 (TYPE A): A blue cube to the left of a red sphere on a white table.
+Negative 2 (TYPE B): A red cube to the right of a blue sphere on a white table.
+
+Caption: "A woman in a yellow dress standing next to a wooden table."
+Negative 1 (TYPE C): A woman in a blue dress standing next to a wooden table.
+Negative 2 (TYPE C): A woman in a yellow dress standing next to a metal table.
+
+Caption: "A small brown dog sitting on top of a large red cushion."
+Negative 1 (TYPE A): A small red dog sitting on top of a large brown cushion.
+Negative 2 (TYPE B): A small brown dog sitting below a large red cushion.
+
+Caption: "A green bottle in front of a black laptop on a desk."
+Negative 1 (TYPE B): A green bottle behind a black laptop on a desk.
+Negative 2 (TYPE A): A black bottle in front of a green laptop on a desk.
+
+Caption: "A person wearing a striped shirt holding a red umbrella."
+Negative 1 (TYPE C): A person wearing a striped shirt holding a blue umbrella.
+Negative 2 (TYPE D): A person wearing a red shirt holding a striped umbrella.
+
+# Your turn — generate negatives for this caption
+Caption: "{caption}"
+
+Output ONLY the {n} negative captions, one per line, no labels, no numbering, no explanation:\
+"""
+
+
+def generate_negatives_llm(
+    caption: str,
+    verifier,
+    n_negatives: int = 2,
+    max_new_tokens: int = 150,
+    fallback_rule_based: bool = True,
+) -> List[str]:
+    """
+    Use Qwen (text-only mode) to generate hard negative captions.
+    Falls back to rule-based generation if LLM output fails validation.
+    """
+    if verifier is None or verifier._model is None:
+        # Verifier not loaded yet — try rule-based only
+        return generate_negatives(caption, n_negatives) if fallback_rule_based else []
+
+    user_prompt = _NEGATIVE_USER_TEMPLATE.format(caption=caption, n=n_negatives)
+    messages = [
+        {"role": "system", "content": _NEGATIVE_SYSTEM},
+        {"role": "user",   "content": user_prompt},
+    ]
+
+    text_in = verifier._processor.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True,
+    )
+    inputs = verifier._processor(
+        text=[text_in], return_tensors="pt",
+    ).to(verifier._model.device)
+
+    with torch.inference_mode():
+        out_ids = verifier._model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+        )
+
+    new_ids  = out_ids[0][inputs["input_ids"].shape[1]:]
+    raw_out  = verifier._processor.tokenizer.decode(new_ids, skip_special_tokens=True).strip()
+
+    # ── Parse output ─────────────────────────────────────────────────────────
+    # Strip Qwen3 thinking blocks before splitting into lines
+    raw_out = re.sub(r"<think>.*?</think>", "", raw_out, flags=re.DOTALL).strip()
+
+    cap_lower = caption.lower().strip().rstrip(".")
+    negatives: List[str] = []
+    seen: set = set()
+
+    for line in raw_out.split("\n"):
+        line = line.strip()
+        line = re.sub(r"^\d+[\.\)]\s*", "", line)
+        line = line.lstrip("-•* ").strip()
+        # Remove TYPE-label prefix if model echoed it
+        line = re.sub(r"^\(TYPE\s+[A-D]\)\s*", "", line, flags=re.IGNORECASE)
+        if not line:
+            continue
+        # Ensure terminal punctuation
+        if not line.endswith("."):
+            line = line + "."
+
+        ll = line.lower().strip().rstrip(".")
+        if ll == cap_lower:
+            continue               # identical to original — useless
+        if ll in seen:
+            continue               # duplicate
+        if len(line.split()) < 5:
+            continue               # too short to be a real caption
+        # Must share at least one content word with the original (same objects)
+        cap_words = set(re.findall(r"[a-z]{3,}", cap_lower))
+        neg_words = set(re.findall(r"[a-z]{3,}", ll))
+        if len(cap_words & neg_words) < 2:
+            continue               # diverged too far — different scene entirely
+
+        seen.add(ll)
+        negatives.append(line)
+        if len(negatives) >= n_negatives:
+            break
+
+    # ── Fallback ──────────────────────────────────────────────────────────────
+    if not negatives and fallback_rule_based:
+        negatives = generate_negatives(caption, n_negatives)
+
+    return negatives
 
 
 # ---------------------------------------------------------------------------
@@ -575,12 +740,9 @@ def main():
                 continue
             stats["num_images_decoded"] += 1
 
-            # ── Build canonical + negatives (cheap, no LLM) ─────────────────
-            canonical        = build_canonical_caption(caption)
-            negative_captions = generate_negatives(caption, n_negatives=args.n_negatives)
-
-            # Require at least one clean entity for the canonical to be useful
-            entities = _extract_entities(caption)
+            # ── Build canonical + entities ───────────────────────────────────
+            canonical = build_canonical_caption(caption)
+            entities  = _extract_entities(caption)
             if not entities:
                 _reject("no_entities")
                 continue
@@ -598,6 +760,15 @@ def main():
                     _reject(reason, {"key": key, "caption": caption})
                     continue
                 stats["num_vlm_verified"] += 1
+
+            # ── LLM negative generation (reuses loaded verifier) ─────────────
+            negative_captions = generate_negatives_llm(
+                caption, verifier, n_negatives=args.n_negatives,
+                fallback_rule_based=True,
+            )
+            if not negative_captions:
+                _reject("no_negatives")
+                continue
 
             # ── Save image ────────────────────────────────────────────────────
             img_ext  = img_name.rsplit(".", 1)[-1].lower() if "." in img_name else "jpg"
