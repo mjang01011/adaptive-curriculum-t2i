@@ -101,33 +101,27 @@ def _apply_smooth_normalize_floor(
 # Pixel-space mask (default)
 # ---------------------------------------------------------------------------
 
-def compute_cargo_mask_pixel(
-    images_b,             # list of G PIL images for one batch item
-    R_c_b: torch.Tensor,  # (G,) float component rewards
-    latent_size: int  = 16,
-    mask_floor:  float = 0.30,
-) -> torch.Tensor:
+def _pixel_importance_map(
+    images_b,
+    R_c_b:      torch.Tensor,
+    latent_size: int,
+    device:      torch.device,
+) -> tuple:
     """
-    Winner-aligned CARGO mask from decoded pixel space.
+    Core pixel importance computation shared by all pixel-mask variants.
 
-    For each 16×16 patch:
-      I[r,c] = mean_over_valid_losers(
-          L1_RGB(winner_patch[r,c], loser_patch[r,c]) * max(R_winner - R_loser, 0)
-      )
-    Then: 3×3 spatial smooth → normalize [0,1] → soft floor.
+    Uses squared-margin weighting so large reward gaps dominate:
+      I[r,c] = sum_valid_losers( L1_RGB[r,c] * margin^2 ) / n_valid
 
-    Returns (seq_len,) float32 in [mask_floor, 1.0].
-    Pixel L1 differences are semantically consistent across generations, unlike
-    VQ token identities which can vary arbitrarily even for similar image content.
+    Returns (I_2d, n_valid) where I_2d is (latent_size, latent_size).
+    Squared margin focuses weight on extreme winner/loser pairs, suppressing
+    the noise from nearly-tied pairs that happen to differ globally in layout.
     """
-    G      = len(images_b)
-    device = R_c_b.device
-    ls     = latent_size
-
+    G           = len(images_b)
     winner_idx  = int(R_c_b.argmax().item())
-    winner_grid = _pil_to_patch_grid(images_b[winner_idx], ls, device)  # (3, L, L)
+    winner_grid = _pil_to_patch_grid(images_b[winner_idx], latent_size, device)
 
-    I       = torch.zeros(ls, ls, device=device, dtype=torch.float32)
+    I       = torch.zeros(latent_size, latent_size, device=device, dtype=torch.float32)
     n_valid = 0
     for g in range(G):
         if g == winner_idx:
@@ -135,15 +129,33 @@ def compute_cargo_mask_pixel(
         margin = max(float(R_c_b[winner_idx].item()) - float(R_c_b[g].item()), 0.0)
         if margin < 1e-6:
             continue
-        loser_grid = _pil_to_patch_grid(images_b[g], ls, device)   # (3, L, L)
-        l1 = (winner_grid - loser_grid).abs().mean(dim=0)           # (L, L)
-        I += l1 * margin
+        loser_grid = _pil_to_patch_grid(images_b[g], latent_size, device)
+        I += (winner_grid - loser_grid).abs().mean(dim=0) * (margin ** 2)
         n_valid += 1
 
     if n_valid > 0:
         I = I / n_valid
+    return I, n_valid
 
-    return _apply_smooth_normalize_floor(I, ls, mask_floor)
+
+def compute_cargo_mask_pixel(
+    images_b,             # list of G PIL images for one batch item
+    R_c_b: torch.Tensor,  # (G,) float component rewards
+    latent_size: int  = 16,
+    mask_floor:  float = 0.30,
+) -> torch.Tensor:
+    """
+    Winner-aligned CARGO mask from decoded pixel space (squared-margin weighting).
+
+    For each 16×16 patch:
+      I[r,c] = mean_valid_losers( L1_RGB[r,c] * margin^2 )
+    Then: 3×3 spatial smooth → normalize [0,1] → soft floor.
+
+    Returns (seq_len,) float32 in [mask_floor, 1.0].
+    """
+    device = R_c_b.device
+    I, _ = _pixel_importance_map(images_b, R_c_b, latent_size, device)
+    return _apply_smooth_normalize_floor(I, latent_size, mask_floor)
 
 
 def compute_cargo_mask_pixel_with_stats(
@@ -154,36 +166,17 @@ def compute_cargo_mask_pixel_with_stats(
 ) -> tuple:
     """
     Same as compute_cargo_mask_pixel but also returns (raw_I_flat, stats_dict).
-    raw_I_flat: (seq_len,) float32 — per-patch L1 importance before
+    raw_I_flat: (seq_len,) float32 — per-patch importance before
                 smoothing/normalization/floor.
     """
-    G      = len(images_b)
-    device = R_c_b.device
-    ls     = latent_size
-    seq_len = ls * ls
+    device  = R_c_b.device
+    seq_len = latent_size * latent_size
 
-    winner_idx  = int(R_c_b.argmax().item())
-    winner_grid = _pil_to_patch_grid(images_b[winner_idx], ls, device)
-
-    I       = torch.zeros(ls, ls, device=device, dtype=torch.float32)
-    n_valid = 0
-    for g in range(G):
-        if g == winner_idx:
-            continue
-        margin = max(float(R_c_b[winner_idx].item()) - float(R_c_b[g].item()), 0.0)
-        if margin < 1e-6:
-            continue
-        loser_grid = _pil_to_patch_grid(images_b[g], ls, device)
-        I += (winner_grid - loser_grid).abs().mean(dim=0) * margin
-        n_valid += 1
-
-    if n_valid > 0:
-        I = I / n_valid
-
-    raw_I_flat = I.reshape(seq_len)
-    mask       = _apply_smooth_normalize_floor(I, ls, mask_floor)
+    I, n_valid    = _pixel_importance_map(images_b, R_c_b, latent_size, device)
+    raw_I_flat    = I.reshape(seq_len)
+    mask          = _apply_smooth_normalize_floor(I, latent_size, mask_floor)
     reward_spread = float(R_c_b.max().item()) - float(R_c_b.min().item())
-    stats      = _mask_stats(raw_I_flat, mask, reward_spread, n_valid, seq_len)
+    stats         = _mask_stats(raw_I_flat, mask, reward_spread, n_valid, seq_len)
     return mask, raw_I_flat, stats
 
 
