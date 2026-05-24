@@ -464,12 +464,13 @@ def main():
                 )
             info = adapted_cls.last_adapter_info or {}
 
-            # ── Embedding contrastive — gradient only through adapter ─────────
-            # Get C_base from cap_proj directly (no GPT backward).
+            # ── Embedding contrastive + regularisation ───────────────────────
             # Gradient flows only through the adapter's own MHA layers (float32).
+            # C_base obtained from cap_proj directly — no GPT backward.
             contrast_loss = torch.tensor(0.0, device=device)
+            reg_loss      = torch.tensor(0.0, device=device)
             neg_indices   = [i for i, n in enumerate(neg_captions) if n is not None]
-            if args.lambda_contrast > 0 and neg_indices:
+            if neg_indices:
                 neg_texts = [neg_captions[i] for i in neg_indices]
                 c_neg     = t5_encode(neg_texts, t5, device)
 
@@ -486,21 +487,28 @@ def main():
                     C_out_neg, _ = adapter(C_base_neg.float())
 
                 B_n = C_out_pos.shape[0]
-                # Minimize cosine similarity → push pos and neg embeddings apart
-                cos_sim = F.cosine_similarity(
-                    C_out_pos.reshape(B_n, -1),
-                    C_out_neg.reshape(B_n, -1),
-                    dim=-1,
-                )
-                contrast_loss = cos_sim.mean()
+
+                if args.lambda_contrast > 0:
+                    cos_sim = F.cosine_similarity(
+                        C_out_pos.reshape(B_n, -1),
+                        C_out_neg.reshape(B_n, -1),
+                        dim=-1,
+                    )
+                    contrast_loss = cos_sim.mean()
+
+                # Reg: penalize effective_delta_to_base = ||γΔ|| / ||C_base||
+                # Uses real tensors → gradient flows to gamma AND out_proj weights.
+                # (C_out_pos - C_base_pos) = gamma * out_proj(raw_delta)
+                base_norm_scalar = C_base_pos.float().norm().item()
+                effective        = (C_out_pos - C_base_pos.float()).norm() / (base_norm_scalar + 1e-8)
+                reg_loss         = args.lambda_delta * effective ** 2
+
                 info = info_c if info_c else info
 
-            # ── Residual regularisation ───────────────────────────────────────
-            delta_norm = info.get("delta_norm", 0.0)
+            loss       = args.lambda_contrast * contrast_loss + reg_loss
+            # For logging — detached floats from the adapter info dict
             gamma      = abs(info.get("gamma",      0.0))
-            reg_loss   = args.lambda_delta * (gamma * delta_norm) ** 2
-
-            loss = args.lambda_contrast * contrast_loss + reg_loss
+            delta_norm = info.get("delta_norm", 0.0)
 
             if not loss.requires_grad:
                 print(f"[train] WARNING: loss has no grad_fn at step {step} (no negatives in batch?), skipping", flush=True)
