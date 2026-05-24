@@ -401,8 +401,9 @@ def main():
                 "train/gamma":      round(gamma,                5),
                 "train/delta_norm": round(float(delta_norm),    4),
                 "train/grad_norm":  round(grad_norm,            4),
-                "train/delta_to_base": round(info.get("delta_to_base", 0.0), 5),
-                "train/slot_entropy":  round(info.get("slot_attn_entropy", 0.0), 4),
+                "train/delta_to_base":           round(info.get("delta_to_base",           0.0), 5),
+                "train/effective_delta_to_base": round(info.get("effective_delta_to_base", 0.0), 6),
+                "train/slot_entropy":            round(info.get("slot_attn_entropy",       0.0), 4),
             }
             with open(log_path, "a") as lf:
                 lf.write(json.dumps(log) + "\n")
@@ -412,8 +413,8 @@ def main():
                 print(
                     f"[train] step={step}  loss={log['train/loss']:.4f}"
                     f"  contrast={log['train/contrast']:.4f}"
-                    f"  gamma={log['train/gamma']:.4f}"
-                    f"  Δ/base={log['train/delta_to_base']:.4f}"
+                    f"  gamma={log['train/gamma']:.5f}"
+                    f"  γΔ/base={log['train/effective_delta_to_base']:.5f}"
                     f"  elapsed={elapsed:.0f}s"
                 )
 

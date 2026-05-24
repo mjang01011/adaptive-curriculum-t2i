@@ -78,9 +78,10 @@ class ImplicitCompositionAdapter(nn.Module):
         self.ln_inject_kv    = nn.LayerNorm(d_model)
 
         self.out_proj = nn.Linear(d_model, d_model, bias=True)
-        self.gamma    = nn.Parameter(torch.tensor(0.0))
+        self.gamma    = nn.Parameter(torch.tensor(1e-3))
 
-        # Zero-init so adapter contributes nothing at initialization
+        # Zero-init out_proj so adapter contributes ~nothing at initialization.
+        # gamma=1e-3 (not 0) so gradients flow reliably from step 0.
         nn.init.zeros_(self.out_proj.weight)
         nn.init.zeros_(self.out_proj.bias)
 
@@ -109,16 +110,20 @@ class ImplicitCompositionAdapter(nn.Module):
         delta = self.out_proj(delta)
         C_out = C_base + self.gamma * delta
 
+        g           = float(self.gamma.item())
+        d_norm      = float(delta.norm().item())
+        b_norm      = float(C_base.norm().item())
         return C_out, {
-            "delta":              delta.detach(),
-            "comp_summary":       Z.detach(),
-            "extract_attn":       extract_attn_w.detach() if extract_attn_w is not None else None,
-            "inject_attn":        inject_attn_w.detach()  if inject_attn_w  is not None else None,
-            "gamma":              float(self.gamma.item()),
-            "delta_norm":         float(delta.norm().item()),
-            "base_norm":          float(C_base.norm().item()),
-            "delta_to_base":      float(delta.norm().item()) / (float(C_base.norm().item()) + 1e-8),
-            "slot_attn_entropy":  _attn_entropy(extract_attn_w),
+            "delta":                   delta.detach(),
+            "comp_summary":            Z.detach(),
+            "extract_attn":            extract_attn_w.detach() if extract_attn_w is not None else None,
+            "inject_attn":             inject_attn_w.detach()  if inject_attn_w  is not None else None,
+            "gamma":                   g,
+            "delta_norm":              d_norm,
+            "base_norm":               b_norm,
+            "delta_to_base":           d_norm / (b_norm + 1e-8),
+            "effective_delta_to_base": abs(g) * d_norm / (b_norm + 1e-8),
+            "slot_attn_entropy":       _attn_entropy(extract_attn_w),
         }
 
 

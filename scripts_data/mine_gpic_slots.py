@@ -282,10 +282,18 @@ class QwenVLMVerifier:
     def _load(self):
         if self._model is not None:
             return
-        from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+        import torch
+        from transformers import AutoModelForImageTextToText, AutoProcessor
         self._processor = AutoProcessor.from_pretrained(self.model_id)
-        self._model     = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            self.model_id, torch_dtype="auto", device_map="auto",
+        self._processor.tokenizer.padding_side = "left"
+        try:
+            import flash_attn  # noqa: F401
+            attn_impl = "flash_attention_2"
+        except ImportError:
+            attn_impl = "sdpa"
+        self._model = AutoModelForImageTextToText.from_pretrained(
+            self.model_id, dtype=torch.bfloat16, device_map="auto",
+            attn_implementation=attn_impl,
         )
         self._model.eval()
 
