@@ -189,6 +189,13 @@ class AdaptedCaptionEmbedder(nn.Module):
                 self._last_info = None
                 return C_base
             C_out = C_out_f32.to(dtype=C_base.dtype)
+            # Sanitize gradients at the bf16↔float32 boundary: the bf16 GPT backward
+            # can produce NaN/inf grads for C_out, which would corrupt float32 adapter
+            # params on the very first optimizer step.
+            if C_out.requires_grad:
+                C_out.register_hook(
+                    lambda g: torch.nan_to_num(g.float(), nan=0.0, posinf=1.0, neginf=-1.0)
+                )
             self._last_info = info
             return C_out
         self._last_info = None

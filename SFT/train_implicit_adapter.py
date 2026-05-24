@@ -32,6 +32,7 @@ Usage
 """
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -149,61 +150,7 @@ def t5_encode(texts: List[str], t5_model, device: str, cls_token_num: int = 120)
     return c_indices
 
 
-def build_t5_cache(
-    dataset,
-    t5_model,
-    device: str,
-    encode_batch: int = 16,
-) -> dict:
-    """
-    Pre-encode every unique caption (positive + negatives) in the dataset.
-    Embeddings are stored on CPU; the training loop moves them to GPU per batch.
-    Returns dict[text -> cpu tensor [120, 2048]].
-    """
-    all_texts: set = set()
-    for row in dataset.rows:
-        cap = row.get("canonical_caption") or row.get("raw_caption", "")
-        if cap:
-            all_texts.add(cap)
-        for neg in row.get("negative_captions", []):
-            if neg:
-                all_texts.add(neg)
-
-    all_texts = list(all_texts)
-    cache: dict = {}
-    print(f"[train] Building T5 cache for {len(all_texts)} unique texts ...", flush=True)
-    for i in range(0, len(all_texts), encode_batch):
-        batch = all_texts[i : i + encode_batch]
-        embs = t5_encode(batch, t5_model, device)           # [B, 120, 2048] on GPU
-        for text, emb in zip(batch, embs):
-            cache[text] = emb.cpu()                         # keep on CPU
-        if i % (encode_batch * 20) == 0:
-            print(f"  [{i}/{len(all_texts)}]", flush=True)
-
-    print(f"[train] T5 cache ready: {len(cache)} entries", flush=True)
-    return cache
-
-
-def t5_lookup(texts: List[str], cache: dict, t5_model, device: str) -> torch.Tensor:
-    """Look up cached T5 embeddings; fall back to live encode for any cache miss."""
-    hits, misses_idx, misses_text = [], [], []
-    for i, text in enumerate(texts):
-        if text in cache:
-            hits.append((i, cache[text]))
-        else:
-            misses_idx.append(i)
-            misses_text.append(text)
-
-    result = [None] * len(texts)
-    for i, emb in hits:
-        result[i] = emb.to(device)
-    if misses_text:
-        live = t5_encode(misses_text, t5_model, device)
-        for idx, emb in zip(misses_idx, live):
-            result[idx] = emb
-            cache[misses_text[misses_idx.index(idx)]] = emb.cpu()
-
-    return torch.stack(result)
+# T5 cache removed — compute on the fly per batch to avoid ~10GB CPU RAM overhead.
 
 
 # ---------------------------------------------------------------------------
@@ -387,12 +334,8 @@ def main():
     print(f"[train] Dataset: {len(train_ds)} examples  "
           f"contrastive_lambda={args.lambda_contrast}")
 
-    # ── T5 cache (encode all captions once, reuse every step) ─────────────────
-    t5_cache = build_t5_cache(train_ds, t5, device)
-    # T5 no longer needed on GPU — cache has everything; offload to free ~3GB
-    t5.model.cpu()
-    torch.cuda.empty_cache()
-    print("[train] T5 offloaded to CPU after cache build", flush=True)
+    # T5 stays on GPU — encode on the fly per batch (no large CPU cache needed)
+    print("[train] T5 on-the-fly encoding (no cache)", flush=True)
 
     use_amp   = args.precision in ("bf16", "fp16")
     amp_dtype = wrapper.dtype if use_amp else None
@@ -451,9 +394,8 @@ def main():
             tokens = torch.stack(token_list, dim=0)   # [B, 256]
             B_eff  = tokens.shape[0]
 
-            # ── T5 conditioning (from cache — no T5 forward at train time) ──
-            # Cast to model dtype (bf16) after lookup; cache stores float32
-            c_indices = t5_lookup(captions, t5_cache, t5, device).to(dtype=wrapper.dtype)
+            # ── T5 conditioning ──────────────────────────────────────────────
+            c_indices = t5_encode(captions, t5, device).to(dtype=wrapper.dtype)
 
             # Guard: skip batch if conditioning or tokens have NaN/inf
             if torch.isnan(c_indices).any() or torch.isinf(c_indices).any():
@@ -495,7 +437,7 @@ def main():
                 if neg_indices:
                     neg_texts    = [neg_captions[i] for i in neg_indices]
                     neg_toks     = tokens[neg_indices]
-                    c_neg        = t5_lookup(neg_texts, t5_cache, t5, device).to(dtype=wrapper.dtype)
+                    c_neg        = t5_encode(neg_texts, t5, device).to(dtype=wrapper.dtype)
 
                     # logp under negative caption — no gradient (used as baseline)
                     with torch.no_grad():
@@ -528,13 +470,22 @@ def main():
 
             loss = ce_loss + args.lambda_contrast * contrast_loss + reg_loss
 
+            if not loss.requires_grad:
+                # Adapter fell back to C_base (NaN output) — no grad_fn, skip step
+                print(f"[train] WARNING: loss has no grad_fn at step {step} (adapter fallback), skipping", flush=True)
+                continue
+
             optimizer.zero_grad()
             loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 [p for pg in optimizer.param_groups for p in pg["params"]],
                 args.grad_clip,
             ).item()
-            optimizer.step()
+            if not math.isfinite(grad_norm):
+                print(f"[train] WARNING: non-finite grad_norm={grad_norm:.4f} at step {step}, skipping optimizer", flush=True)
+                optimizer.zero_grad()
+            else:
+                optimizer.step()
 
             # ── Log ──────────────────────────────────────────────────────────
             log = {
