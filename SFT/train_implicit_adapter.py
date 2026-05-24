@@ -496,7 +496,11 @@ def main():
                 continue
 
             optimizer.zero_grad()
+            if step <= 3:
+                torch.autograd.set_detect_anomaly(True)
             loss.backward()
+            if step <= 3:
+                torch.autograd.set_detect_anomaly(False)
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 [p for pg in optimizer.param_groups for p in pg["params"]],
                 args.grad_clip,
