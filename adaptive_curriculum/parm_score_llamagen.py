@@ -172,6 +172,19 @@ def main():
     sys.path.insert(0, args.parm_repo)
     from selector import ImageSelector
 
+    # Patch transformers to use eager attention when flash_attn is not installed.
+    # selector.py does not pass attn_implementation, so transformers auto-detects
+    # and raises if flash_attn is missing.
+    try:
+        import flash_attn  # noqa: F401
+    except ImportError:
+        import transformers.modeling_utils as _tmu
+        @classmethod
+        def _eager_attn_only(cls, config, *args, **kwargs):
+            config._attn_implementation = "eager"
+            config._attn_implementation_internal = "eager"
+        _tmu.PreTrainedModel._check_and_enable_flash_attn_2 = _eager_attn_only
+
     # ---- Load PARM -----------------------------------------------------------
     print(f"[parm] Loading PARM from {args.parm_ckpt} ...", flush=True)
     _print_mem("before load")
