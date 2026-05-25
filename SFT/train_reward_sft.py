@@ -176,6 +176,13 @@ def parse_args():
 # Val image generation
 # ---------------------------------------------------------------------------
 
+def _reset_kv_caches(model):
+    """Set kv_cache=None on all attention layers so training forward works."""
+    for module in model.modules():
+        if hasattr(module, "kv_cache"):
+            module.kv_cache = None
+
+
 def _log_val_images(gpt, vq, t5, val_prompts, args, device, dtype,
                     step: int, wandb_run, prefix: str = "val"):
     """Generate images for val prompts and log to W&B."""
@@ -232,6 +239,9 @@ def _log_val_images(gpt, vq, t5, val_prompts, args, device, dtype,
             print(f"[val] logged {len(wb_images)} prompts to W&B as '{prefix}/*'", flush=True)
         except Exception as e:
             print(f"[val] W&B image log failed: {e}", flush=True)
+
+    _reset_kv_caches(gpt)
+    gpt.train()
 
 
 # ---------------------------------------------------------------------------
