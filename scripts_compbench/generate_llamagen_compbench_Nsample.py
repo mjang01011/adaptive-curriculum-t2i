@@ -110,9 +110,13 @@ def main():
     from autoregressive.models.generate import generate
     from torchvision.utils import save_image
 
+    print("[compbench_gen] Loading GPT...", flush=True)
     gpt      = model.gpt.eval()
+    print("[compbench_gen] Loading VQ...", flush=True)
     vq       = model.vq_model
+    print("[compbench_gen] Loading T5...", flush=True)
     t5       = model.t5
+    print("[compbench_gen] All models loaded.", flush=True)
     ls       = model.latent_size
     cb       = model.codebook_embed_dim
     dtype    = model.dtype
