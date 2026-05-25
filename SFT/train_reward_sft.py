@@ -182,13 +182,8 @@ def _log_val_images(gpt, vq, t5, val_prompts, args, device, dtype,
     import torchvision.transforms.functional as TF
     from autoregressive.models.generate import generate
 
-    ls = vq.config.resolution // vq.config.f if hasattr(vq, "config") else 16
-    cb = 8
-    # derive from wrapper attrs stored on vq if available
-    if hasattr(vq, "_latent_size"):
-        ls = vq._latent_size
-    if hasattr(vq, "_cb"):
-        cb = vq._cb
+    ls = vq._latent_size
+    cb = vq._cb
 
     gpt.eval()
     wb_images: dict = {}
