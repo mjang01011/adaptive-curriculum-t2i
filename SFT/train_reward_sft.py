@@ -278,6 +278,24 @@ def main():
     if args.repo_root not in sys.path:
         sys.path.insert(0, args.repo_root)
 
+    # Prevent SafeSoftmaxBackward0 NaN: replace is_causal=True with explicit
+    # finite additive bias so 0 * (-inf) never appears in the backward pass.
+    import torch.nn.functional as _F
+    _orig_sdpa = _F.scaled_dot_product_attention
+    def _safe_sdpa(query, key, value, attn_mask=None, dropout_p=0.0,
+                   is_causal=False, **kwargs):
+        if is_causal:
+            Lq, Lk = query.shape[-2], key.shape[-2]
+            bias = torch.zeros(Lq, Lk, device=query.device, dtype=query.dtype)
+            bias.masked_fill_(
+                torch.ones(Lq, Lk, dtype=torch.bool,
+                           device=query.device).triu(diagonal=1), -1e4)
+            attn_mask = bias if attn_mask is None else attn_mask + bias
+            is_causal = False
+        return _orig_sdpa(query, key, value, attn_mask=attn_mask,
+                          dropout_p=dropout_p, is_causal=is_causal, **kwargs)
+    _F.scaled_dot_product_attention = _safe_sdpa
+
     # ── Models ────────────────────────────────────────────────────────────────
     print("[train] Loading LlamaGen ...", flush=True)
     from adaptive_curriculum.model.llamagen_wrapper import LlamaGenWrapper
