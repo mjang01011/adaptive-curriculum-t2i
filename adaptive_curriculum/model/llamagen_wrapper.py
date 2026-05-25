@@ -843,7 +843,8 @@ class LlamaGenWrapper:
 
     def load_checkpoint(self, path: str):
         ckpt = torch.load(path, map_location=self.device)
-        self.gpt.load_state_dict(ckpt["gpt_model"], strict=False)
+        state = ckpt.get("gpt_model") or ckpt.get("model") or ckpt
+        self.gpt.load_state_dict(state, strict=False)
         if self._optimizer and ckpt.get("optimizer"):
             self._optimizer.load_state_dict(ckpt["optimizer"])
         self._step = ckpt.get("step", 0)
