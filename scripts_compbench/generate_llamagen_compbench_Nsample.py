@@ -97,7 +97,7 @@ def main():
         precision=args.precision,
         use_lora=use_lora,
         lora_config={"rank": 16, "alpha": 32, "dropout": 0.0,
-                     "start_layer": 0, "target_modules": ["wqkv", "wo"]}
+                     "start_layer": 0, "target_modules": ["wqkv", "wo", "w1", "w2", "w3"]}
                     if use_lora else None,
     )
 
