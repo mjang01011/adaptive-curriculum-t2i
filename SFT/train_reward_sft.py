@@ -376,9 +376,11 @@ def main():
     # Sequence = cls_token_num conditioning tokens + (seq_len - 1) image tokens.
     _seq = wrapper.cls_token_num + (256 - 1)  # 120 + 255 = 375
     _causal_mask = torch.zeros(_seq, _seq, device=device, dtype=dtype)
+    # Use -50 not -1e4: in bf16 exp(-1e4)=0 exactly, causing 0*inf=NaN in
+    # softmax backward. exp(-50)≈1.9e-22 is non-zero in bf16, fixing the NaN.
     _causal_mask.masked_fill_(
         torch.ones(_seq, _seq, dtype=torch.bool, device=device).triu(diagonal=1),
-        -1e4,
+        -50.0,
     )
 
     # ── Training ──────────────────────────────────────────────────────────────
