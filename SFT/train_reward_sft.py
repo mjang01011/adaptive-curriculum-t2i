@@ -157,11 +157,86 @@ def parse_args():
     p.add_argument("--log-every",      type=int,   default=10)
     p.add_argument("--dl-workers",     type=int,   default=2)
     p.add_argument("--seed",           type=int,   default=42)
+    # val image logging
+    p.add_argument("--val-prompts-jsonl", default=None,
+                   help="Prompts file for val image generation (same format as sample_and_score)")
+    p.add_argument("--val-n-prompts",  type=int,   default=8,
+                   help="Number of val prompts to generate images for")
+    p.add_argument("--val-gen-count",  type=int,   default=2,
+                   help="Images per val prompt")
+    p.add_argument("--cfg-scale",      type=float, default=2.0)
     p.add_argument("--wandb",          action="store_true")
     p.add_argument("--wandb-project",  default="llamagen-reward-sft")
     p.add_argument("--wandb-entity",   default=None)
     p.add_argument("--run-name",       default=None)
     return p.parse_args()
+
+
+# ---------------------------------------------------------------------------
+# Val image generation
+# ---------------------------------------------------------------------------
+
+def _log_val_images(gpt, vq, t5, val_prompts, args, device, dtype,
+                    step: int, wandb_run, prefix: str = "val"):
+    """Generate images for val prompts and log to W&B."""
+    import torchvision.transforms.functional as TF
+    from autoregressive.models.generate import generate
+
+    ls = vq.config.resolution // vq.config.f if hasattr(vq, "config") else 16
+    cb = 8
+    # derive from wrapper attrs stored on vq if available
+    if hasattr(vq, "_latent_size"):
+        ls = vq._latent_size
+    if hasattr(vq, "_cb"):
+        cb = vq._cb
+
+    gpt.eval()
+    wb_images: dict = {}
+
+    with torch.no_grad():
+        for row in val_prompts[:args.val_n_prompts]:
+            prompt = row["prompt"]
+            pid    = row.get("id", prompt[:20])
+
+            embs, masks = t5.get_text_embeddings([prompt])
+            emb, mask   = embs[0], masks[0]
+            valid       = int(mask.sum().item())
+            shifted     = torch.cat([emb[valid:], emb[:valid]])
+            mask_s      = torch.flip(mask, dims=[-1])
+            c_idx  = (shifted * mask_s[:, None]).to(device=device, dtype=dtype).unsqueeze(0)
+            c_mask = mask_s.to(device=device, dtype=dtype).unsqueeze(0)
+
+            G = args.val_gen_count
+            torch.manual_seed(args.seed + abs(hash(pid)) % 100000)
+            try:
+                idx_all     = generate(gpt, c_idx.repeat(G, 1, 1), ls ** 2,
+                                       c_mask.repeat(G, 1),
+                                       cfg_scale=args.cfg_scale,
+                                       temperature=1.0, top_k=2000, top_p=1.0,
+                                       sample_logits=True)
+                decoded_all = vq.decode_code(idx_all, [G, cb, ls, ls])
+            except Exception as e:
+                print(f"[val] gen failed for '{prompt[:40]}': {e}", flush=True)
+                continue
+
+            pils = []
+            for si in range(G):
+                img_t = (decoded_all[si].float().clamp(-1, 1) + 1) / 2
+                pils.append(TF.to_pil_image(img_t.cpu()))
+
+            wb_images[pid] = (prompt, pils)
+
+    if wandb_run and wb_images:
+        try:
+            import wandb
+            log_d = {}
+            for pid, (prompt, pils) in wb_images.items():
+                key = f"{prefix}/{pid}"
+                log_d[key] = [wandb.Image(p, caption=f"[{prefix}] {prompt[:80]}") for p in pils]
+            wandb_run.log(log_d, step=step)
+            print(f"[val] logged {len(wb_images)} prompts to W&B as '{prefix}/*'", flush=True)
+        except Exception as e:
+            print(f"[val] W&B image log failed: {e}", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -212,9 +287,12 @@ def main():
         } if args.train_lora else {},
     )
     gpt   = wrapper.gpt.to(device)
+    vq    = wrapper.vq_model.to(device)
     t5    = wrapper.t5
     t5.model.to(device)
     dtype = wrapper.dtype
+    ls    = wrapper.latent_size
+    cb    = wrapper.codebook_embed_dim
 
     # Freeze everything, then unfreeze LoRA params
     for p in gpt.parameters():
@@ -236,6 +314,19 @@ def main():
         for p in gpt.parameters():
             p.requires_grad = True
         print("[train] Full fine-tune (no LoRA)", flush=True)
+
+    # Attach latent dims to vq so _log_val_images can find them
+    vq._latent_size = ls
+    vq._cb          = cb
+
+    # ── Val prompts ───────────────────────────────────────────────────────────
+    val_prompts: list = []
+    if args.val_prompts_jsonl:
+        with open(args.val_prompts_jsonl) as f:
+            for line in f:
+                if line.strip():
+                    val_prompts.append(json.loads(line.strip()))
+        print(f"[train] {len(val_prompts)} val prompts loaded", flush=True)
 
     # Resume LoRA weights
     start_step = 0
@@ -277,6 +368,12 @@ def main():
     step = start_step
     t0   = time.time()
     best_loss = float("inf")
+
+    # Log base model images before any training
+    if val_prompts and wandb_run:
+        print("[train] Logging base model val images ...", flush=True)
+        _log_val_images(gpt, vq, t5, val_prompts, args, device, dtype,
+                        step=0, wandb_run=wandb_run, prefix="base")
 
     for epoch in range(args.num_epochs):
         gpt.train()
@@ -369,6 +466,10 @@ def main():
             if step % args.save_every == 0:
                 _save_ckpt(out_dir / f"ckpt_step{step}.pt", gpt, optimizer, step,
                            lora_only=args.train_lora)
+
+            if step % args.eval_every == 0 and val_prompts and wandb_run:
+                _log_val_images(gpt, vq, t5, val_prompts, args, device, dtype,
+                                step=step, wandb_run=wandb_run, prefix="val")
 
         avg_epoch_loss = epoch_loss / max(1, epoch_steps)
         print(f"[train] Epoch {epoch} done  avg_loss={avg_epoch_loss:.4f}", flush=True)
