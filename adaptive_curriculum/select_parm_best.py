@@ -43,12 +43,19 @@ def main():
     img_dir = out_dir / "selected_images"
     img_dir.mkdir(parents=True, exist_ok=True)
 
+    # Use norm_yes_prob (yes/(yes+no)) as selection key — denser signal than raw yes_prob.
+    # Falls back to parm_yes_prob for backwards-compat with older score files.
+    def _score(r):
+        if "parm_norm_yes_prob" in r:
+            return r["parm_norm_yes_prob"]
+        return r.get("parm_yes_prob", 0.0)
+
     selected_rows = []
     n_all_zero = 0
 
     for pid, group in groups.items():
-        best = max(group, key=lambda r: r.get("parm_yes_prob", 0.0))
-        if all(r.get("parm_yes_prob", 0.0) == 0.0 for r in group):
+        best = max(group, key=_score)
+        if all(_score(r) == 0.0 for r in group):
             n_all_zero += 1
 
         src = Path(best["image_path"])
@@ -61,17 +68,17 @@ def main():
         out = dict(best)
         out["selected_image_path"] = str(dst)
         out["num_candidates"] = len(group)
-        out["mean_yes_prob"] = sum(r.get("parm_yes_prob", 0.0) for r in group) / len(group)
-        out["max_yes_prob"] = best.get("parm_yes_prob", 0.0)
+        out["mean_norm_yes_prob"] = sum(_score(r) for r in group) / len(group)
+        out["max_norm_yes_prob"]  = _score(best)
         selected_rows.append(out)
 
     with open(out_dir / "selected.jsonl", "w", encoding="utf-8") as f:
         for row in selected_rows:
             f.write(json.dumps(row) + "\n")
 
-    mean_score = sum(r["max_yes_prob"] for r in selected_rows) / max(len(selected_rows), 1)
+    mean_score = sum(r["max_norm_yes_prob"] for r in selected_rows) / max(len(selected_rows), 1)
     print(f"Selected {len(selected_rows)} images → {img_dir}")
-    print(f"Mean best yes_prob: {mean_score:.3f}")
+    print(f"Mean best norm_yes_prob: {mean_score:.3f}")
     if n_all_zero:
         print(f"[warn] {n_all_zero} prompts had all zero scores (scoring may have failed)")
 
