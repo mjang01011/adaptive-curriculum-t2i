@@ -183,6 +183,202 @@ def smoke_test_sampling():
 
 @app.function(
     image=image,
+    timeout=60 * 60 * 3,
+    volumes={"/vol": vol},
+)
+def setup_volume():
+    """
+    One-time setup: downloads all required assets into the llamagen-curriculum volume.
+
+    Downloads:
+      - LlamaGen repo                        → /vol/repo/LlamaGen
+      - vq_ds16_t2i.pt                       → /vol/pretrained_models/
+      - t2i_XL_stage1_256.pt                 → /vol/pretrained_models/
+      - google/flan-t5-xl                    → /vol/pretrained_models/t5-ckpt/flan-t5-xl/
+      - T2I-CompBench repo (prompt txt only) → /vol/T2I-CompBench/
+
+    Run once:
+      modal run adaptive_curriculum/modal/modal_app.py::setup_volume
+    """
+    import subprocess
+    from pathlib import Path
+    from huggingface_hub import hf_hub_download, snapshot_download
+
+    pretrained = Path("/vol/pretrained_models")
+    pretrained.mkdir(parents=True, exist_ok=True)
+
+    # ---- LlamaGen repo -------------------------------------------------------
+    llamagen_dir = Path("/vol/repo/LlamaGen")
+    if not llamagen_dir.exists():
+        print("[setup] Cloning LlamaGen repo...", flush=True)
+        Path("/vol/repo").mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["git", "clone", "--depth=1",
+             "https://github.com/FoundationVision/LlamaGen.git",
+             str(llamagen_dir)],
+            check=True,
+        )
+        print("[setup] LlamaGen repo cloned.", flush=True)
+    else:
+        print("[setup] LlamaGen repo already present, skipping clone.", flush=True)
+
+    # ---- Pretrained model checkpoints via huggingface_hub --------------------
+    # hf_hub_download handles HF LFS redirects correctly; wget does not reliably.
+    for fname in ["vq_ds16_t2i.pt", "t2i_XL_stage1_256.pt"]:
+        dest = pretrained / fname
+        if dest.exists():
+            print(f"[setup] {fname} already present, skipping.", flush=True)
+        else:
+            print(f"[setup] Downloading {fname} ...", flush=True)
+            hf_hub_download(
+                repo_id="peizesun/llamagen_t2i",
+                filename=fname,
+                local_dir=str(pretrained),
+            )
+            print(f"[setup] {fname} done ({dest.stat().st_size / 1e9:.2f} GB)", flush=True)
+
+    # ---- flan-t5-xl ----------------------------------------------------------
+    # T5Embedder with local_cache=True loads from {cache_dir}/{dir_or_name},
+    # i.e. /vol/pretrained_models/t5-ckpt/flan-t5-xl — must match exactly.
+    t5_dir = pretrained / "t5-ckpt" / "flan-t5-xl"
+    if t5_dir.exists() and any(t5_dir.iterdir()):
+        print("[setup] flan-t5-xl already present, skipping.", flush=True)
+    else:
+        print("[setup] Downloading google/flan-t5-xl ...", flush=True)
+        t5_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_download(
+            repo_id="google/flan-t5-xl",
+            local_dir=str(t5_dir),
+            ignore_patterns=["*.msgpack", "*.h5", "flax_model*", "tf_model*", "rust_model*"],
+        )
+        print("[setup] flan-t5-xl done.", flush=True)
+
+    # ---- T2I-CompBench (prompt txt files only) -------------------------------
+    compbench_dir = Path("/vol/T2I-CompBench")
+    if not compbench_dir.exists():
+        print("[setup] Cloning T2I-CompBench repo (depth=1)...", flush=True)
+        subprocess.run(
+            ["git", "clone", "--depth=1",
+             "https://github.com/Karine-Huang/T2I-CompBench.git",
+             str(compbench_dir)],
+            check=True,
+        )
+        print("[setup] T2I-CompBench cloned.", flush=True)
+    else:
+        print("[setup] T2I-CompBench already present, skipping.", flush=True)
+
+    vol.commit()
+    print("[setup] Volume setup complete.", flush=True)
+
+
+@app.function(
+    image=image,
+    gpu="A100-80GB",
+    timeout=60 * 60 * 6,
+    volumes={"/vol": vol},
+)
+def run_compbench_generation(
+    model_ckpt: str = "/vol/pretrained_models/t2i_XL_stage1_256.pt",
+    lora_ckpt: str = "",
+    num_samples: int = 10,
+    batch_size: int = 4,
+    run_name: str = "",
+    cfg_scale: float = 2.0,
+    seed: int = 0,
+    categories: list = None,
+):
+    """
+    Generate N images per CompBench prompt on Modal A100-80GB.
+
+    Volume layout expected:
+      /vol/pretrained_models/t2i_XL_stage1_256.pt
+      /vol/pretrained_models/vq_ds16_t2i.pt
+      /vol/pretrained_models/t5-ckpt/
+      /vol/T2I-CompBench/examples/dataset/*.txt
+      /vol/repo/LlamaGen/
+
+    Output saved to: /vol/outputs_compbench/<run_name>/<category>/samples/
+
+    Run locally:
+      modal run adaptive_curriculum/modal/modal_app.py::run_compbench_generation \
+        --num-samples 10 --batch-size 8
+    """
+    import os
+    import sys
+    import subprocess
+    from datetime import datetime
+    from pathlib import Path
+
+    os.chdir("/root/project")
+    sys.path.insert(0, "/vol/repo/LlamaGen")
+    os.environ["PYTHONPATH"] = f"/root/project:/vol/repo/LlamaGen:{os.environ.get('PYTHONPATH', '')}"
+
+    if not run_name:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        stem = Path(lora_ckpt or model_ckpt).stem
+        run_name = f"llamagen_{stem}_compbench_{num_samples}sample_{ts}"
+
+    root = Path(f"/vol/outputs_compbench/{run_name}")
+    root.mkdir(parents=True, exist_ok=True)
+
+    comp_dir = Path("/vol/T2I-CompBench")
+    prompt_files = {
+        "color":       comp_dir / "examples/dataset/color_val.txt",
+        "shape":       comp_dir / "examples/dataset/shape_val.txt",
+        "texture":     comp_dir / "examples/dataset/texture_val.txt",
+        "spatial":     comp_dir / "examples/dataset/spatial_val.txt",
+        "non_spatial": comp_dir / "examples/dataset/non_spatial_val.txt",
+        "complex":     comp_dir / "examples/dataset/complex_val.txt",
+    }
+
+    cats = categories or list(prompt_files.keys())
+    failed = []
+
+    for cat in cats:
+        pf = prompt_files[cat]
+        if not pf.exists():
+            print(f"[warn] prompt file missing for {cat}: {pf} — skipping", flush=True)
+            failed.append(cat)
+            continue
+
+        out_dir = root / cat / "samples"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[generate] {cat} → {out_dir}", flush=True)
+
+        cmd = [
+            sys.executable,
+            "/root/project/scripts_compbench/generate_llamagen_compbench_Nsample.py",
+            "--prompt-file",  str(pf),
+            "--category",     cat,
+            "--repo-root",    "/vol/repo/LlamaGen",
+            "--gpt-ckpt",     model_ckpt,
+            "--vq-ckpt",      "/vol/pretrained_models/vq_ds16_t2i.pt",
+            "--t5-path",      "/vol/pretrained_models/t5-ckpt",
+            "--output-dir",   str(out_dir),
+            "--num-samples",  str(num_samples),
+            "--batch-size",   str(batch_size),
+            "--cfg-scale",    str(cfg_scale),
+            "--seed",         str(seed),
+        ]
+        if lora_ckpt:
+            cmd += ["--lora-checkpoint", lora_ckpt]
+
+        try:
+            subprocess.run(cmd, check=True)
+            print(f"[generate] {cat} done", flush=True)
+        except subprocess.CalledProcessError as e:
+            print(f"[error] {cat} failed (exit {e.returncode}) — continuing", flush=True)
+            failed.append(cat)
+
+    vol.commit()
+    if failed:
+        print(f"[compbench] Finished with failures: {failed}", flush=True)
+    else:
+        print(f"[compbench] All categories done. Results at: {root}", flush=True)
+
+
+@app.function(
+    image=image,
     gpu="A100",
     timeout=3600,
     volumes={"/vol": vol},
