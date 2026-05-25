@@ -59,7 +59,12 @@ def orm_batch(selector, prompt: str, image_paths: list, chunk_size: int = 4):
     All candidates share the same text question → input_ids are identical →
     true GPU batching. Uses max_new_tokens=1 (only first token needed).
 
-    Returns list of (selected: bool, yes_prob: float) aligned with image_paths.
+    Returns list of (selected, yes_prob, norm_yes_prob) aligned with image_paths.
+      yes_prob       — raw softmax prob of "yes" over full vocab (sparse, ~0–0.1)
+      norm_yes_prob  — yes_prob / (yes_prob + no_prob)  (dense 0–1 reward signal)
+
+    norm_yes_prob is the recommended reward for GRPO: it uses all the model's
+    discriminative signal without being diluted by the ~150K other vocabulary tokens.
     Falls back to sequential on error.
     """
     from PIL import Image
@@ -83,6 +88,7 @@ def orm_batch(selector, prompt: str, image_paths: list, chunk_size: int = 4):
     ).to(selector.device)
 
     yes_id = selector.tokenizer.convert_tokens_to_ids("yes")
+    no_id  = selector.tokenizer.convert_tokens_to_ids("no")
 
     results = []
     for chunk_start in range(0, len(image_paths), chunk_size):
@@ -116,27 +122,32 @@ def orm_batch(selector, prompt: str, image_paths: list, chunk_size: int = 4):
             # scores[0]: (B, vocab_size) logits for first generated token
             first_scores = torch.nn.functional.softmax(cont.scores[0], dim=-1)
             yes_probs = first_scores[:, yes_id].tolist()
+            no_probs  = first_scores[:, no_id].tolist()
 
-            # generated token is the last in sequences (input + 1 new token)
-            input_len = input_ids.shape[1]
-            generated_ids = cont.sequences[:, input_len]
+            # LLaVA generate returns only the generated tokens (not input),
+            # so cont.sequences has shape (B, n_new_tokens). With max_new_tokens=1
+            # the generated token is always at index 0.
+            generated_ids = cont.sequences[:, 0]
             responses = [
                 selector.tokenizer.convert_ids_to_tokens([tok_id.item()])[0].lower()
                 for tok_id in generated_ids
             ]
 
-            for resp, yp in zip(responses, yes_probs):
-                results.append((resp == "yes", yp))
+            for resp, yp, np_ in zip(responses, yes_probs, no_probs):
+                norm_yp = yp / (yp + np_ + 1e-8)
+                results.append((resp == "yes", yp, norm_yp))
 
         except Exception as e:
             print(f"  [warn] batch chunk failed ({e}), falling back to sequential", flush=True)
             for path in chunk:
                 try:
                     sel, yp = selector.orm([prompt], path)
-                    results.append((sel, float(yp)))
+                    # sequential fallback: re-derive no_prob from the model's scores
+                    # selector.orm only returns yes_prob; use 0.5 norm as fallback
+                    results.append((sel, float(yp), 0.5))
                 except Exception as e2:
                     print(f"  [warn] sequential fallback also failed for {path}: {e2}", flush=True)
-                    results.append((False, 0.0))
+                    results.append((False, 0.0, 0.0))
 
     return results
 
@@ -230,11 +241,12 @@ def main():
 
             scores = orm_batch(selector, prompt, image_paths, chunk_size=args.score_batch_size)
 
-            for row, (image_path, (selected, yes_prob)) in zip(
+            for row, (image_path, (selected, yes_prob, norm_yes_prob)) in zip(
                 group, zip(image_paths, scores)
             ):
                 out_row = dict(row)
-                out_row["parm_yes_prob"] = yes_prob
+                out_row["parm_yes_prob"]      = yes_prob       # raw (sparse)
+                out_row["parm_norm_yes_prob"] = norm_yes_prob  # yes/(yes+no) — use this for GRPO
                 out_row["parm_selected"] = selected
                 fout.write(json.dumps(out_row) + "\n")
                 total_scored += 1
